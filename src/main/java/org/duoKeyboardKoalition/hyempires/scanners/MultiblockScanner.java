@@ -1,4 +1,4 @@
-package org.duoKeyboardKoalition.edenHouseSpigot.scanners;
+package org.duoKeyboardKoalition.hyempires.scanners;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -14,7 +14,7 @@ import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.duoKeyboardKoalition.edenHouseSpigot.utils.CSVWriter;
+import org.duoKeyboardKoalition.hyempires.utils.CSVWriter;
 
 import java.util.ArrayList;
 import java.util.HashSet;

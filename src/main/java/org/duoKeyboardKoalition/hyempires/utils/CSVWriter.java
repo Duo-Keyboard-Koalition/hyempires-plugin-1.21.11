@@ -1,4 +1,4 @@
-package org.duoKeyboardKoalition.edenHouseSpigot.utils;
+package org.duoKeyboardKoalition.hyempires.utils;
 
 import org.bukkit.plugin.java.JavaPlugin;
 

@@ -1,4 +1,4 @@
-package org.duoKeyboardKoalition.edenHouseSpigot.Listener;
+package org.duoKeyboardKoalition.hyempires.Listener;
 
 import org.bukkit.World;
 import org.bukkit.entity.EntityType;

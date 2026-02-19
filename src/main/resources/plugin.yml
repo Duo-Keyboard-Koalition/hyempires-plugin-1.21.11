@@ -1,4 +1,4 @@
-name: edenHouseSpigot
-version: '1.0-SNAPSHOT-QFII'
-main: org.duoKeyboardKoalition.edenHouseSpigot.EdenHouseSpigot
+name: HyEmpires
+version: '1.0-SNAPSHOT'
+main: org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin
 api-version: '1.21'

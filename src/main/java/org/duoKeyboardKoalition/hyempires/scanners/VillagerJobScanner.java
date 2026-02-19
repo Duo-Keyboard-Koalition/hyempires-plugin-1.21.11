@@ -1,4 +1,4 @@
-package org.duoKeyboardKoalition.edenHouseSpigot.scanners;
+package org.duoKeyboardKoalition.hyempires.scanners;
 
 import org.bukkit.*;
 import org.bukkit.entity.Entity;
@@ -11,7 +11,7 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.VillagerCareerChangeEvent;
 import org.bukkit.event.entity.VillagerAcquireTradeEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.duoKeyboardKoalition.edenHouseSpigot.utils.CSVWriter;
+import org.duoKeyboardKoalition.hyempires.utils.CSVWriter;
 
 import java.util.*;
 
@@ -39,7 +39,7 @@ public class VillagerJobScanner implements Listener {
                     jobsite != null ? jobsite.getBlockX() : "null",
                     jobsite != null ? jobsite.getBlockY() : "null",
                     jobsite != null ? jobsite.getBlockZ() : "null",
-                    profession != null ? profession.name() : "NONE",
+                    profession != null ? profession.getKeyOrThrow().getKey() : "NONE",
                     bed != null ? bed.getBlockX() : "null",
                     bed != null ? bed.getBlockY() : "null",
                     bed != null ? bed.getBlockZ() : "null",
