@@ -2,3 +2,8 @@ name: HyEmpires
 version: '1.0-SNAPSHOT'
 main: org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin
 api-version: '1.21'
+
+commands:
+  hyempires:
+    description: HyEmpires plugin commands - villages, campsites, and villager management
+    usage: /hyempires <help|village|campsite|reload>

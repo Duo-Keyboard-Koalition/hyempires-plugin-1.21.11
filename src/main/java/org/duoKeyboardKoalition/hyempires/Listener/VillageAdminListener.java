@@ -10,6 +10,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
 
 /**
@@ -18,10 +19,10 @@ import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
  * administrative control over a village.
  */
 public class VillageAdminListener implements Listener {
-    private final JavaPlugin plugin;
+    private final HyEmpiresPlugin plugin;
     private final VillageManager villageManager;
 
-    public VillageAdminListener(JavaPlugin plugin, VillageManager villageManager) {
+    public VillageAdminListener(HyEmpiresPlugin plugin, VillageManager villageManager) {
         this.plugin = plugin;
         this.villageManager = villageManager;
     }
@@ -37,14 +38,28 @@ public class VillageAdminListener implements Listener {
 
         // Check if placing a bell (village admin block)
         if (block.getType() == Material.BELL) {
-            // Create a village after a short delay to ensure block is fully placed
+            // Create or expand village after a short delay to ensure block is fully placed
             plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
                 VillageManager.VillageData village = villageManager.createVillage(
                         block.getLocation(), player, null);
                 
                 if (village != null) {
-                    player.sendMessage("§aVillage '" + village.name + "' has been established!");
-                    player.sendMessage("§ePopulation: " + village.population + " villagers");
+                    // Check if this was an expansion or new village
+                    boolean isExpansion = village.additionalBells.stream()
+                            .anyMatch(loc -> loc.getBlockX() == block.getX() && 
+                                           loc.getBlockY() == block.getY() && 
+                                           loc.getBlockZ() == block.getZ());
+                    
+                    if (!isExpansion && village.adminX == block.getX() && 
+                        village.adminY == block.getY() && village.adminZ == block.getZ()) {
+                        // New village
+                        player.sendMessage("§aVillage '" + village.name + "' has been established!");
+                        player.sendMessage("§ePopulation: " + village.population + " villagers");
+                    }
+                    // Expansion message is handled in expandVillage()
+                } else {
+                    // Bell already exists at this location
+                    player.sendMessage("§cA bell already exists at this location!");
                 }
             }, 5L);
         }
@@ -61,16 +76,16 @@ public class VillageAdminListener implements Listener {
         if (block.getType() == Material.BELL) {
             VillageManager.VillageData village = villageManager.getVillageAt(block.getLocation());
             if (village != null) {
-                // Check if player owns this village
-                if (village.owner != null && !village.owner.equals(player.getUniqueId()) && !player.isOp()) {
-                    player.sendMessage("§cYou can only break your own village admin blocks!");
+                // Only OPs can break village bells (for admin purposes)
+                if (!player.isOp()) {
+                    player.sendMessage("§cOnly administrators can remove village bells!");
                     event.setCancelled(true);
                     return;
                 }
 
-                // Remove the village
-                villageManager.removeVillage(block.getLocation());
-                player.sendMessage("§6Village administration has been abandoned.");
+                // Remove the village (admin only)
+                villageManager.removeVillage(block.getLocation(), player);
+                player.sendMessage("§6Village has been removed by admin.");
             }
         }
     }
@@ -90,38 +105,66 @@ public class VillageAdminListener implements Listener {
 
         if (village != null) {
             event.setCancelled(true);
+            
+            // Check if player is holding paper - give them admin token
+            org.bukkit.inventory.ItemStack item = player.getInventory().getItemInMainHand();
+            if (item != null && item.getType() == Material.PAPER) {
+                // Check if they already have a token for this village
+                boolean hasToken = false;
+                for (org.bukkit.inventory.ItemStack invItem : player.getInventory().getContents()) {
+                    if (invItem != null && org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.isToken(invItem)) {
+                        String tokenVillage = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, invItem);
+                        if (village.name.equals(tokenVillage)) {
+                            hasToken = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!hasToken) {
+                    // Give admin token
+                    org.bukkit.inventory.ItemStack token = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.createToken((HyEmpiresPlugin) plugin, village.name);
+                    
+                    // Try to add to inventory
+                    java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
+                    if (overflow.isEmpty()) {
+                        // Consume one paper
+                        if (item.getAmount() > 1) {
+                            item.setAmount(item.getAmount() - 1);
+                        } else {
+                            player.getInventory().setItemInMainHand(null);
+                        }
+                        
+                        player.sendMessage("§a§lVillage Administration Token Received!");
+                        player.sendMessage("§7Right-click the bell with this token to open the administration menu.");
+                    } else {
+                        player.sendMessage("§cYour inventory is full! Make space and try again.");
+                    }
+                } else {
+                    player.sendMessage("§eYou already have an administration token for this village!");
+                }
+                return;
+            }
 
-            // Show village info
-            player.sendMessage(villageManager.getVillageInfo(village));
+            // Show village info (normal right-click)
+            player.sendMessage(villageManager.getVillageInfo(village, player));
 
-            // If owner, show additional options
+            // If can administer, show options
             if (villageManager.canAdminister(player, village)) {
                 player.sendMessage("§7=== Administration Options ===");
-                player.sendMessage("§e[Left-click] §7Abandon village");
+                player.sendMessage("§e[Right-click with Paper] §7Get administration token");
                 player.sendMessage("§e[Shift+Right-click] §7Refresh population count");
+            }
+            
+            // Update activity for influence system
+            if (plugin.getInfluenceManager() != null) {
+                plugin.getInfluenceManager().updateActivity(village.name, player.getUniqueId());
             }
         }
     }
 
-    /**
-     * Handles left-clicking to abandon village.
-     */
-    @EventHandler
-    public void onPlayerInteractLeft(PlayerInteractEvent event) {
-        if (event.getAction() != Action.LEFT_CLICK_BLOCK) return;
-
-        Block block = event.getClickedBlock();
-        if (block == null || block.getType() != Material.BELL) return;
-
-        Player player = event.getPlayer();
-        VillageManager.VillageData village = villageManager.getVillageAt(block.getLocation());
-
-        if (village != null && villageManager.canAdminister(player, village)) {
-            villageManager.removeVillage(block.getLocation());
-            player.sendMessage("§cVillage administration has been abandoned.");
-            event.setCancelled(true);
-        }
-    }
+    // Removed: Abandon village functionality - villages cannot be abandoned
+    // Ownership is now managed through the influence system
 
     /**
      * Handles shift right-click to refresh population.
@@ -155,13 +198,18 @@ public class VillageAdminListener implements Listener {
 
         // Check if placing within 16 blocks of a village admin block
         VillageManager.VillageData village = villageManager.getVillageContaining(block.getLocation());
-        if (village != null && village.owner != null) {
-            if (!village.owner.equals(player.getUniqueId()) && !player.isOp()) {
-                // Allow building only if player has permission
-                org.bukkit.Location adminLoc = village.getAdminLocation();
-                if (adminLoc != null && block.getLocation().distance(adminLoc) < 16) {
-                    player.sendMessage("§cYou cannot build near another player's village center!");
+        if (village != null) {
+            org.bukkit.Location adminLoc = village.getAdminLocation();
+            if (adminLoc != null && block.getLocation().distance(adminLoc) < 16) {
+                // Use influence system to check permissions
+                if (!villageManager.canAdminister(player, village)) {
+                    player.sendMessage("§cYou need more influence in this village to build near the center!");
                     event.setCancelled(true);
+                } else {
+                    // Player can build - gain small influence
+                    if (plugin.getInfluenceManager() != null) {
+                        plugin.getInfluenceManager().addInfluence(village.name, player.getUniqueId(), 0.5, "Building");
+                    }
                 }
             }
         }
@@ -178,11 +226,12 @@ public class VillageAdminListener implements Listener {
 
         // Check if breaking within 16 blocks of a village admin block
         VillageManager.VillageData village = villageManager.getVillageContaining(block.getLocation());
-        if (village != null && village.owner != null) {
-            if (!village.owner.equals(player.getUniqueId()) && !player.isOp()) {
-                org.bukkit.Location adminLoc = village.getAdminLocation();
-                if (adminLoc != null && block.getLocation().distance(adminLoc) < 16) {
-                    player.sendMessage("§cYou cannot destroy near another player's village center!");
+        if (village != null) {
+            org.bukkit.Location adminLoc = village.getAdminLocation();
+            if (adminLoc != null && block.getLocation().distance(adminLoc) < 16) {
+                // Use influence system to check permissions
+                if (!villageManager.canAdminister(player, village)) {
+                    player.sendMessage("§cYou need more influence in this village to destroy near the center!");
                     event.setCancelled(true);
                 }
             }

@@ -14,23 +14,36 @@ import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.duoKeyboardKoalition.hyempires.utils.CSVWriter;
+import org.duoKeyboardKoalition.hyempires.utils.NBTFileManager;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 public class MultiblockScanner implements Listener {
     private final JavaPlugin plugin;
-    private final CSVWriter csvWriter;
+    private final NBTFileManager nbtManager;
     private final Set<Location> foundStructures = new HashSet<>();
 
     public MultiblockScanner(JavaPlugin plugin) {
         this.plugin = plugin;
-        String[] headers = {"World", "X", "Y", "Z"};
-        this.csvWriter = new CSVWriter(plugin, "multiblocks.csv", headers);
+        this.nbtManager = new NBTFileManager(plugin, "multiblocks.nbt");
+        loadExistingData();
+    }
+    
+    private void loadExistingData() {
+        List<Map<String, Object>> nbtData = nbtManager.loadList("multiblocks");
+        for (Map<String, Object> nbtMultiblock : nbtData) {
+            Location loc = NBTFileManager.nbtToLocation(nbtMultiblock);
+            if (loc != null) {
+                foundStructures.add(loc);
+            }
+        }
+        plugin.getLogger().info("Loaded " + foundStructures.size() + " multiblocks from NBT");
     }
 
     // Event Handlers
@@ -76,32 +89,22 @@ public class MultiblockScanner implements Listener {
     // Multiblock Registration Methods
     private void registerNewMultiblock(Location location) {
         foundStructures.add(location);
-
-        String csvLine = String.format("%s,%d,%d,%d",
-                Objects.requireNonNull(location.getWorld()).getName(),
-                location.getBlockX(),
-                location.getBlockY(),
-                location.getBlockZ());
-
-        csvWriter.append(csvLine);
+        saveData();
         notifyNearbyPlayers(location, "New multiblock structure registered at: ");
     }
 
     private void unregisterMultiblock(Location location) {
         foundStructures.remove(location);
-
-        List<String> updatedEntries = new ArrayList<>();
-        for (Location loc : foundStructures) {
-            updatedEntries.add(String.format("%s,%d,%d,%d",
-                    loc.getWorld().getName(),
-                    loc.getBlockX(),
-                    loc.getBlockY(),
-                    loc.getBlockZ()
-            ));
-        }
-
-        csvWriter.writeAll(updatedEntries);
+        saveData();
         notifyNearbyPlayers(location, "Multiblock structure broken at: ");
+    }
+    
+    private void saveData() {
+        List<Map<String, Object>> nbtMultiblocks = new ArrayList<>();
+        for (Location loc : foundStructures) {
+            nbtMultiblocks.add(NBTFileManager.locationToNBT(loc));
+        }
+        nbtManager.saveList("multiblocks", nbtMultiblocks);
     }
 
     // Scanning Methods

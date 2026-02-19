@@ -8,7 +8,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.duoKeyboardKoalition.hyempires.utils.CSVWriter;
+import org.duoKeyboardKoalition.hyempires.utils.NBTFileManager;
 
 import java.io.*;
 import java.util.*;
@@ -19,7 +19,7 @@ import java.util.*;
  */
 public class CampsiteManager {
     private final JavaPlugin plugin;
-    private final CSVWriter csvWriter;
+    private final NBTFileManager nbtManager;
     private final Set<CampsiteData> campsites = new HashSet<>();
     private static final String[] HEADERS = {
             "CampsiteName", "World", "X", "Y", "Z", "Owner", "CreatedDate", "Active"
@@ -68,34 +68,92 @@ public class CampsiteManager {
 
     public CampsiteManager(JavaPlugin plugin) {
         this.plugin = plugin;
-        this.csvWriter = new CSVWriter(plugin, "campsites.csv", HEADERS);
+        this.nbtManager = new NBTFileManager(plugin, "campsites.nbt");
         loadExistingData();
     }
 
     private void loadExistingData() {
-        File dataFile = new File(plugin.getDataFolder(), "campsites.csv");
-        if (!dataFile.exists()) {
-            return;
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(dataFile))) {
-            String line;
-            boolean firstLine = true;
-            while ((line = reader.readLine()) != null) {
-                if (firstLine) {
-                    firstLine = false;
-                    continue; // Skip header
-                }
-                if (!line.trim().isEmpty()) {
-                    CampsiteData data = new CampsiteData();
-                    data.fromCsvLine(line);
+        // Try loading from NBT first
+        List<Map<String, Object>> nbtData = nbtManager.loadList("campsites");
+        
+        if (!nbtData.isEmpty()) {
+            // Load from NBT
+            for (Map<String, Object> nbtCampsite : nbtData) {
+                CampsiteData data = fromNBT(nbtCampsite);
+                if (data != null) {
                     campsites.add(data);
                 }
             }
-            plugin.getLogger().info("Loaded " + campsites.size() + " campsites from disk");
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to load campsites: " + e.getMessage());
+            plugin.getLogger().info("Loaded " + campsites.size() + " campsites from NBT");
+            return;
         }
+        
+        // Fallback: Try loading from old CSV format (migration)
+        File oldCsvFile = new File(plugin.getDataFolder(), "campsites.csv");
+        if (oldCsvFile.exists()) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(oldCsvFile))) {
+                String line;
+                boolean firstLine = true;
+                while ((line = reader.readLine()) != null) {
+                    if (firstLine) {
+                        firstLine = false;
+                        continue; // Skip header
+                    }
+                    if (!line.trim().isEmpty()) {
+                        CampsiteData data = new CampsiteData();
+                        data.fromCsvLine(line);
+                        campsites.add(data);
+                    }
+                }
+                plugin.getLogger().info("Migrated " + campsites.size() + " campsites from CSV to NBT");
+                saveData(); // Save to NBT format
+            } catch (IOException e) {
+                plugin.getLogger().severe("Failed to load campsites from CSV: " + e.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Convert CampsiteData to NBT map.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toNBT(CampsiteData data) {
+        Map<String, Object> nbt = new HashMap<>();
+        nbt.put("name", data.name);
+        nbt.put("world", data.world);
+        nbt.put("x", data.x);
+        nbt.put("y", data.y);
+        nbt.put("z", data.z);
+        nbt.put("owner", data.owner != null ? data.owner.toString() : null);
+        nbt.put("createdDate", data.createdDate);
+        nbt.put("active", data.active);
+        return nbt;
+    }
+    
+    /**
+     * Convert NBT map to CampsiteData.
+     */
+    @SuppressWarnings("unchecked")
+    private CampsiteData fromNBT(Map<String, Object> nbt) {
+        CampsiteData data = new CampsiteData();
+        data.name = (String) nbt.get("name");
+        data.world = (String) nbt.get("world");
+        data.x = ((Number) nbt.getOrDefault("x", 0)).intValue();
+        data.y = ((Number) nbt.getOrDefault("y", 64)).intValue();
+        data.z = ((Number) nbt.getOrDefault("z", 0)).intValue();
+        
+        Object ownerObj = nbt.get("owner");
+        if (ownerObj != null) {
+            try {
+                data.owner = UUID.fromString(ownerObj.toString());
+            } catch (IllegalArgumentException e) {
+                data.owner = null;
+            }
+        }
+        
+        data.createdDate = ((Number) nbt.getOrDefault("createdDate", System.currentTimeMillis())).longValue();
+        data.active = (Boolean) nbt.getOrDefault("active", true);
+        return data;
     }
 
     /**
@@ -238,12 +296,11 @@ public class CampsiteManager {
     }
 
     private void saveData() {
-        List<String> lines = new ArrayList<>();
-        lines.add(String.join(",", HEADERS));
+        List<Map<String, Object>> nbtCampsites = new ArrayList<>();
         for (CampsiteData data : campsites) {
-            lines.add(data.toCsvString());
+            nbtCampsites.add(toNBT(data));
         }
-        csvWriter.writeAll(lines);
+        nbtManager.saveList("campsites", nbtCampsites);
     }
 
     private void notifyNearbyPlayers(Location location, String message) {

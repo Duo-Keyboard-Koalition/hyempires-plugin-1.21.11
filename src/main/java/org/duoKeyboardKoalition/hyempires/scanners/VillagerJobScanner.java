@@ -11,20 +11,35 @@ import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.VillagerCareerChangeEvent;
 import org.bukkit.event.entity.VillagerAcquireTradeEvent;
 import org.bukkit.plugin.java.JavaPlugin;
-import org.duoKeyboardKoalition.hyempires.utils.CSVWriter;
+import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
+import org.duoKeyboardKoalition.hyempires.utils.NBTFileManager;
 
 import java.util.*;
 
 public class VillagerJobScanner implements Listener {
     private final JavaPlugin plugin;
-    private final CSVWriter csvWriter;
+    private final NBTFileManager nbtManager;
     private final Map<UUID, VillagerData> villagerDataMap = new HashMap<>();
-    private static final String[] HEADERS = {
-            "VillagerName", "UUID", "JobsiteX", "JobsiteY", "JobsiteZ",
-            "Profession", "BedX", "BedY", "BedZ", "Status"
-    };
+    
+    // NBT file structure:
+    // villager_jobs.nbt:
+    //   villagers:
+    //     - name: Villager
+    //       uuid: uuid-string
+    //       jobsite:
+    //         world: world
+    //         x: 100
+    //         y: 64
+    //         z: 200
+    //       profession: farmer
+    //       bed:
+    //         world: world
+    //         x: 101
+    //         y: 64
+    //         z: 201
+    //       status: ALIVE
 
-    private class VillagerData {
+    public class VillagerData {
         String name;
         UUID uuid;
         Location jobsite;
@@ -50,13 +65,31 @@ public class VillagerJobScanner implements Listener {
 
     public VillagerJobScanner(JavaPlugin plugin) {
         this.plugin = plugin;
-        this.csvWriter = new CSVWriter(plugin, "villager_jobs.csv", HEADERS);
+        this.nbtManager = new NBTFileManager(plugin, "villager_jobs.nbt");
         loadExistingData();
         startPeriodicScanning();
     }
 
+    @SuppressWarnings("unchecked")
     private void loadExistingData() {
-        // Implementation will be provided by the CSVWriter
+        // Try loading from NBT first
+        List<Map<String, Object>> nbtData = nbtManager.loadList("villagers");
+        
+        if (!nbtData.isEmpty()) {
+            // Load from NBT
+            for (Map<String, Object> nbtVillager : nbtData) {
+                VillagerData data = fromNBT(nbtVillager);
+                if (data != null && data.uuid != null) {
+                    villagerDataMap.put(data.uuid, data);
+                }
+            }
+            plugin.getLogger().info("Loaded " + villagerDataMap.size() + " villagers from NBT");
+            return;
+        }
+        
+        // Fallback: Try loading from old CSV format (migration)
+        // Note: CSV migration would require parsing the old format
+        // For now, we'll just start fresh with NBT
         // Load existing data into villagerDataMap
     }
 
@@ -67,14 +100,38 @@ public class VillagerJobScanner implements Listener {
 
     public void scanAllVillagers() {
         plugin.getServer().getWorlds().forEach(world -> {
-            world.getEntitiesByClass(Villager.class).forEach(this::updateVillagerData);
+            world.getEntitiesByClass(Villager.class).forEach(villager -> {
+                updateVillagerData(villager);
+                
+                // Check if villager's job site is outside village territory
+                if (plugin instanceof HyEmpiresPlugin) {
+                    HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
+                    
+                    org.bukkit.Location jobSiteLoc = villager.getWorkstation();
+                    if (jobSiteLoc != null) {
+                        String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
+                        if (villageName == null) {
+                            // Job site is outside village territory - break it
+                            org.bukkit.block.Block workstationBlock = jobSiteLoc.getBlock();
+                            if (isWorkstationBlock(workstationBlock.getType())) {
+                                workstationBlock.breakNaturally();
+                                plugin.getLogger().info("Removed workstation outside village territory for villager " + villager.getCustomName());
+                            }
+                        }
+                    }
+                }
+            });
         });
 
-        // Check for dead villagers
+        // Check for dead villagers and update bed/workstation locations
         Set<UUID> activeVillagers = new HashSet<>();
-        plugin.getServer().getWorlds().forEach(world ->
-                world.getEntitiesByClass(Villager.class)
-                        .forEach(v -> activeVillagers.add(v.getUniqueId())));
+        plugin.getServer().getWorlds().forEach(world -> {
+            world.getEntitiesByClass(Villager.class).forEach(v -> {
+                activeVillagers.add(v.getUniqueId());
+                // Update villager data to sync bed/workstation locations
+                updateVillagerData(v);
+            });
+        });
 
         villagerDataMap.forEach((uuid, data) -> {
             if (!activeVillagers.contains(uuid) && "ALIVE".equals(data.status)) {
@@ -83,7 +140,71 @@ public class VillagerJobScanner implements Listener {
             }
         });
     }
-    private void updateVillagerData(Villager villager) {
+    
+    private boolean isWorkstationBlock(org.bukkit.Material material) {
+        String name = material.name();
+        return name.contains("COMPOSTER") || name.contains("TABLE") || name.contains("LECTERN") ||
+               name.contains("STAND") || name.contains("FURNACE") || name.contains("CAULDRON") ||
+               name.contains("CUTTER") || name.contains("LOOM") || name.contains("GRINDSTONE") ||
+               name.contains("BARREL");
+    }
+
+    @EventHandler
+    public void onVillagerDeath(EntityDeathEvent event) {
+        if (event.getEntity() instanceof Villager) {
+            UUID uuid = event.getEntity().getUniqueId();
+            VillagerData data = villagerDataMap.get(uuid);
+            if (data != null) {
+                data.status = "DEAD";
+                updateCsv();
+            }
+        }
+    }
+
+    @EventHandler
+    public void onVillagerCareerChange(VillagerCareerChangeEvent event) {
+        Villager villager = event.getEntity();
+        updateVillagerData(villager);
+        
+        // Check if villager is trying to claim a job site outside village territory
+        if (plugin instanceof HyEmpiresPlugin) {
+            HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
+            
+            // Get villager's job site location (if available)
+            org.bukkit.Location jobSiteLoc = villager.getWorkstation();
+            if (jobSiteLoc != null) {
+                // Check if job site is in village territory
+                String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
+                
+                if (villageName == null) {
+                    // Job site is outside village territory - break the link
+                    // Schedule task to break the workstation block
+                    plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
+                        org.bukkit.block.Block workstationBlock = jobSiteLoc.getBlock();
+                        if (isWorkstationBlock(workstationBlock.getType())) {
+                            // Break the block to unlink the villager
+                            workstationBlock.breakNaturally();
+                            plugin.getLogger().info("Broke workstation outside village territory at " + jobSiteLoc);
+                        }
+                    }, 20L); // 1 second delay
+                }
+            }
+        }
+    }
+
+    @EventHandler
+    public void onVillagerAcquireTrade(VillagerAcquireTradeEvent event) {
+        updateVillagerData((Villager) event.getEntity());
+    }
+
+    public void updateCsv() {
+        saveData();
+    }
+    
+    /**
+     * Public method to update villager data (called by assignment listener).
+     */
+    public void updateVillagerData(Villager villager) {
         UUID uuid = villager.getUniqueId();
         VillagerData data = villagerDataMap.computeIfAbsent(uuid, k -> new VillagerData());
 
@@ -105,51 +226,167 @@ public class VillagerJobScanner implements Listener {
             data.profession = villager.getProfession();
             changed = true;
         }
-
-        // For job site and bed location, we'll need to track these through events instead
-        // or implement a different detection method since direct memory access isn't available
+        
+        // Update workstation location if available
+        Location workstationLoc = villager.getWorkstation();
+        if (workstationLoc != null) {
+            if (data.jobsite == null || !data.jobsite.equals(workstationLoc)) {
+                data.jobsite = workstationLoc.clone();
+                changed = true;
+            }
+        }
+        
+        // Update bed location if available (check if villager has a bed)
+        Location bedLoc = villager.getBedLocation();
+        if (bedLoc != null) {
+            if (data.bed == null || !data.bed.equals(bedLoc)) {
+                data.bed = bedLoc.clone();
+                changed = true;
+            }
+        }
 
         if (changed) {
             updateCsv();
         }
     }
-
-    @EventHandler
-    public void onVillagerDeath(EntityDeathEvent event) {
-        if (event.getEntity() instanceof Villager) {
-            UUID uuid = event.getEntity().getUniqueId();
-            VillagerData data = villagerDataMap.get(uuid);
-            if (data != null) {
-                data.status = "DEAD";
-                updateCsv();
+    
+    private void saveData() {
+        List<Map<String, Object>> nbtVillagers = new ArrayList<>();
+        for (VillagerData data : villagerDataMap.values()) {
+            nbtVillagers.add(toNBT(data));
+        }
+        nbtManager.saveList("villagers", nbtVillagers);
+    }
+    
+    /**
+     * Convert VillagerData to NBT map.
+     */
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toNBT(VillagerData data) {
+        Map<String, Object> nbt = new HashMap<>();
+        nbt.put("name", data.name);
+        nbt.put("uuid", data.uuid != null ? data.uuid.toString() : null);
+        
+        if (data.jobsite != null) {
+            nbt.put("jobsite", NBTFileManager.locationToNBT(data.jobsite));
+        } else {
+            nbt.put("jobsite", null);
+        }
+        
+        nbt.put("profession", data.profession != null ? data.profession.getKeyOrThrow().getKey() : "NONE");
+        
+        if (data.bed != null) {
+            nbt.put("bed", NBTFileManager.locationToNBT(data.bed));
+        } else {
+            nbt.put("bed", null);
+        }
+        
+        nbt.put("status", data.status);
+        return nbt;
+    }
+    
+    /**
+     * Convert NBT map to VillagerData.
+     */
+    @SuppressWarnings("unchecked")
+    private VillagerData fromNBT(Map<String, Object> nbt) {
+        VillagerData data = new VillagerData();
+        data.name = (String) nbt.get("name");
+        
+        Object uuidObj = nbt.get("uuid");
+        if (uuidObj != null) {
+            try {
+                data.uuid = UUID.fromString(uuidObj.toString());
+            } catch (IllegalArgumentException e) {
+                return null;
             }
         }
-    }
-
-    @EventHandler
-    public void onVillagerCareerChange(VillagerCareerChangeEvent event) {
-        updateVillagerData(event.getEntity());
-    }
-
-    @EventHandler
-    public void onVillagerAcquireTrade(VillagerAcquireTradeEvent event) {
-        updateVillagerData((Villager) event.getEntity());
-    }
-
-    private void updateCsv() {
-        List<String> lines = new ArrayList<>();
-        lines.add(String.join(",", HEADERS));
-
-        villagerDataMap.values().forEach(data ->
-                lines.add(data.toCsvString())
-        );
-
-        // Use CSVWriter to write all lines
-        csvWriter.writeAll(lines);
+        
+        Object jobsiteObj = nbt.get("jobsite");
+        if (jobsiteObj instanceof Map) {
+            data.jobsite = NBTFileManager.nbtToLocation((Map<String, Object>) jobsiteObj);
+        }
+        
+        String professionStr = (String) nbt.getOrDefault("profession", "NONE");
+        if (!professionStr.equals("NONE")) {
+            try {
+                NamespacedKey key = NamespacedKey.fromString(professionStr);
+                data.profession = Villager.Profession.valueOf(key.getKey().toUpperCase());
+            } catch (Exception e) {
+                data.profession = null;
+            }
+        }
+        
+        Object bedObj = nbt.get("bed");
+        if (bedObj instanceof Map) {
+            data.bed = NBTFileManager.nbtToLocation((Map<String, Object>) bedObj);
+        }
+        
+        data.status = (String) nbt.getOrDefault("status", "ALIVE");
+        return data;
     }
 
     // Utility method to get current data
     public Map<UUID, VillagerData> getVillagerData() {
         return Collections.unmodifiableMap(villagerDataMap);
+    }
+    
+    /**
+     * Get villager data by UUID.
+     */
+    public VillagerData getVillagerData(UUID uuid) {
+        return villagerDataMap.get(uuid);
+    }
+    
+    /**
+     * Get villager bed location.
+     */
+    public Location getVillagerBedLocation(Villager villager) {
+        VillagerData data = villagerDataMap.get(villager.getUniqueId());
+        return data != null ? data.bed : null;
+    }
+    
+    /**
+     * Get villager workstation location.
+     */
+    public Location getVillagerWorkstationLocation(Villager villager) {
+        VillagerData data = villagerDataMap.get(villager.getUniqueId());
+        return data != null ? data.jobsite : null;
+    }
+    
+    /**
+     * Assign bed to villager (public API).
+     */
+    public boolean assignBed(Villager villager, Location bedLocation) {
+        UUID uuid = villager.getUniqueId();
+        VillagerData data = villagerDataMap.computeIfAbsent(uuid, k -> {
+            VillagerData newData = new VillagerData();
+            newData.uuid = uuid;
+            newData.name = villager.getCustomName() != null ? villager.getCustomName() : 
+                          "Villager-" + uuid.toString().substring(0, 8);
+            return newData;
+        });
+        
+        data.bed = bedLocation.clone();
+        updateCsv();
+        return true;
+    }
+    
+    /**
+     * Assign workstation to villager (public API).
+     */
+    public boolean assignWorkstation(Villager villager, Location workstationLocation) {
+        UUID uuid = villager.getUniqueId();
+        VillagerData data = villagerDataMap.computeIfAbsent(uuid, k -> {
+            VillagerData newData = new VillagerData();
+            newData.uuid = uuid;
+            newData.name = villager.getCustomName() != null ? villager.getCustomName() : 
+                          "Villager-" + uuid.toString().substring(0, 8);
+            return newData;
+        });
+        
+        data.jobsite = workstationLocation.clone();
+        updateCsv();
+        return true;
     }
 }
