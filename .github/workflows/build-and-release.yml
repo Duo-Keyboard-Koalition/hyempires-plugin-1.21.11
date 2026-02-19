@@ -1,0 +1,85 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build with Maven
+        run: mvn clean package
+
+      - name: Get version from tag or input
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Building version: $VERSION"
+
+      - name: Find and rename JAR file
+        run: |
+          cd target
+          # Find the JAR file (could be hyempires-1.0-SNAPSHOT.jar or original-*.jar from shade plugin)
+          JAR_FILE=$(find . -maxdepth 1 -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar" | head -n 1)
+          if [ -z "$JAR_FILE" ]; then
+            echo "Error: JAR file not found!"
+            ls -la
+            exit 1
+          fi
+          echo "Found JAR: $JAR_FILE"
+          mv "$JAR_FILE" HyEmpires-${{ steps.get_version.outputs.version }}.jar
+          echo "Renamed to: HyEmpires-${{ steps.get_version.outputs.version }}.jar"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HyEmpires-${{ steps.get_version.outputs.version }}
+          path: target/HyEmpires-${{ steps.get_version.outputs.version }}.jar
+
+      - name: Create Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: target/HyEmpires-${{ steps.get_version.outputs.version }}.jar
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(steps.get_version.outputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create Release (Manual)
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: Release ${{ github.event.inputs.version }}
+          files: target/HyEmpires-${{ github.event.inputs.version }}.jar
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.event.inputs.version, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
