@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -87,7 +89,8 @@ public class VillageMenuListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player)) return;
         
         Player player = (Player) event.getWhoClicked();
-        String title = event.getView().getTitle();
+        Component titleComponent = event.getView().title();
+        String title = LegacyComponentSerializer.legacySection().serialize(titleComponent);
         
         // Check if it's a village menu
         if (!title.contains("Administration") && !title.contains("Population")) {
@@ -99,8 +102,8 @@ public class VillageMenuListener implements Listener {
         ItemStack clicked = event.getCurrentItem();
         if (clicked == null || clicked.getType() == Material.AIR) return;
         
-        String itemName = clicked.getItemMeta() != null && clicked.getItemMeta().getDisplayName() != null ?
-                clicked.getItemMeta().getDisplayName() : "";
+        Component displayName = clicked.getItemMeta() != null ? clicked.getItemMeta().displayName() : null;
+        String itemName = displayName != null ? LegacyComponentSerializer.legacySection().serialize(displayName) : "";
         
         // Main menu actions
         if (title.contains("Administration")) {

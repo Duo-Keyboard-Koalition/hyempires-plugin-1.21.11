@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -43,10 +45,15 @@ public class BoundaryToolListener implements Listener {
             return false;
         }
         ItemMeta meta = item.getItemMeta();
-        if (meta == null || !meta.hasDisplayName()) {
+        if (meta == null) {
             return false;
         }
-        return meta.getDisplayName().equals(BOUNDARY_TOOL_NAME);
+        Component displayName = meta.displayName();
+        if (displayName == null) {
+            return false;
+        }
+        String nameStr = LegacyComponentSerializer.legacySection().serialize(displayName);
+        return nameStr.equals(BOUNDARY_TOOL_NAME);
     }
     
     /**
@@ -56,12 +63,13 @@ public class BoundaryToolListener implements Listener {
         ItemStack tool = new ItemStack(Material.STICK);
         ItemMeta meta = tool.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(BOUNDARY_TOOL_NAME);
-            meta.setLore(Arrays.asList(
-                    "§7Right-click chunk to claim",
-                    "§7Left-click chunk to unclaim",
-                    "§7Shift+Right-click to see info"
-            ));
+            meta.displayName(LegacyComponentSerializer.legacySection().deserialize(BOUNDARY_TOOL_NAME));
+            List<Component> loreComponents = Arrays.asList(
+                    LegacyComponentSerializer.legacySection().deserialize("§7Right-click chunk to claim"),
+                    LegacyComponentSerializer.legacySection().deserialize("§7Left-click chunk to unclaim"),
+                    LegacyComponentSerializer.legacySection().deserialize("§7Shift+Right-click to see info")
+            );
+            meta.lore(loreComponents);
             tool.setItemMeta(meta);
         }
         return tool;

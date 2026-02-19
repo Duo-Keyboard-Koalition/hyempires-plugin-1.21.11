@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.utils;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Material;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
@@ -9,6 +11,7 @@ import org.bukkit.NamespacedKey;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 
 import java.util.Arrays;
+import java.util.List;
 
 /**
  * Utility class for creating and managing Village Administration Tokens.
@@ -27,13 +30,14 @@ public class VillageAdminToken {
         ItemMeta meta = token.getItemMeta();
         
         if (meta != null) {
-            meta.setDisplayName(TOKEN_NAME);
-            meta.setLore(Arrays.asList(
-                TOKEN_LORE_1,
-                TOKEN_LORE_2,
-                "",
-                "§7Village: §e" + villageName
-            ));
+            meta.displayName(LegacyComponentSerializer.legacySection().deserialize(TOKEN_NAME));
+            List<Component> loreComponents = Arrays.asList(
+                LegacyComponentSerializer.legacySection().deserialize(TOKEN_LORE_1),
+                LegacyComponentSerializer.legacySection().deserialize(TOKEN_LORE_2),
+                LegacyComponentSerializer.legacySection().deserialize(""),
+                LegacyComponentSerializer.legacySection().deserialize("§7Village: §e" + villageName)
+            );
+            meta.lore(loreComponents);
             
             // Store village name in persistent data
             PersistentDataContainer container = meta.getPersistentDataContainer();
@@ -54,10 +58,15 @@ public class VillageAdminToken {
             return false;
         }
         ItemMeta meta = item.getItemMeta();
-        if (meta == null || !meta.hasDisplayName()) {
+        if (meta == null) {
             return false;
         }
-        return meta.getDisplayName().equals(TOKEN_NAME);
+        Component displayName = meta.displayName();
+        if (displayName == null) {
+            return false;
+        }
+        String nameStr = LegacyComponentSerializer.legacySection().serialize(displayName);
+        return nameStr.equals(TOKEN_NAME);
     }
     
     /**
@@ -81,8 +90,10 @@ public class VillageAdminToken {
         }
         
         // Fallback: try to get from lore
-        if (meta.hasLore() && meta.getLore() != null) {
-            for (String line : meta.getLore()) {
+        List<Component> lore = meta.lore();
+        if (lore != null) {
+            for (Component lineComponent : lore) {
+                String line = LegacyComponentSerializer.legacySection().serialize(lineComponent);
                 if (line.contains("Village:")) {
                     return line.substring(line.indexOf("§e") + 2);
                 }

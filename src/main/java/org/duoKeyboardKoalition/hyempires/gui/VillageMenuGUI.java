@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.gui;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -32,7 +34,8 @@ public class VillageMenuGUI {
      * Open the main village menu.
      */
     public void openMainMenu(Player player, VillageManager.VillageData village) {
-        Inventory menu = Bukkit.createInventory(null, 27, "§6§l" + village.name + " §7Administration");
+        Component title = LegacyComponentSerializer.legacySection().deserialize("§6§l" + village.name + " §7Administration");
+        Inventory menu = Bukkit.createInventory(null, 27, title);
         
         // Population button
         ItemStack populationBtn = createMenuItem(
@@ -88,7 +91,8 @@ public class VillageMenuGUI {
         int size = Math.max(9, ((villagers.size() + 8) / 9) * 9);
         size = Math.min(size, 54); // Max 6 rows
         
-        Inventory inv = Bukkit.createInventory(null, size, "§a§lPopulation - " + village.name);
+        Component popTitle = LegacyComponentSerializer.legacySection().deserialize("§a§lPopulation - " + village.name);
+        Inventory inv = Bukkit.createInventory(null, size, popTitle);
         
         for (int i = 0; i < Math.min(villagers.size(), size); i++) {
             VillagerInfo info = villagers.get(i);
@@ -133,8 +137,9 @@ public class VillageMenuGUI {
             
             VillagerInfo info = new VillagerInfo();
             info.villager = villager;
-            info.name = villager.getCustomName() != null ? villager.getCustomName() : 
-                       (data != null && data.name != null ? data.name : "Villager");
+            Component customName = villager.customName();
+            String nameStr = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : null;
+            info.name = nameStr != null ? nameStr : (data != null && data.name != null ? data.name : "Villager");
             info.bedLocation = data != null ? data.bed : null;
             info.workplaceLocation = data != null ? data.jobsite : null;
             info.profession = villager.getProfession();
@@ -155,8 +160,12 @@ public class VillageMenuGUI {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(name);
-            meta.setLore(lore);
+            meta.displayName(LegacyComponentSerializer.legacySection().deserialize(name));
+            List<Component> loreComponents = new ArrayList<>();
+            for (String line : lore) {
+                loreComponents.add(LegacyComponentSerializer.legacySection().deserialize(line));
+            }
+            meta.lore(loreComponents);
             item.setItemMeta(meta);
         }
         return item;
@@ -171,32 +180,36 @@ public class VillageMenuGUI {
         ItemMeta meta = item.getItemMeta();
         
         if (meta != null) {
-            meta.setDisplayName("§a" + info.name);
+            meta.displayName(LegacyComponentSerializer.legacySection().deserialize("§a" + info.name));
             
-            List<String> lore = new ArrayList<>();
-            lore.add("§7§m                    ");
-            lore.add("§eBed Location:");
+            List<String> loreStrings = new ArrayList<>();
+            loreStrings.add("§7§m                    ");
+            loreStrings.add("§eBed Location:");
             if (info.bedLocation != null) {
-                lore.add("§7  X: §f" + info.bedLocation.getBlockX());
-                lore.add("§7  Y: §f" + info.bedLocation.getBlockY());
-                lore.add("§7  Z: §f" + info.bedLocation.getBlockZ());
+                loreStrings.add("§7  X: §f" + info.bedLocation.getBlockX());
+                loreStrings.add("§7  Y: §f" + info.bedLocation.getBlockY());
+                loreStrings.add("§7  Z: §f" + info.bedLocation.getBlockZ());
             } else {
-                lore.add("§c  No bed assigned");
+                loreStrings.add("§c  No bed assigned");
             }
-            lore.add("");
-            lore.add("§eWorkplace Location:");
+            loreStrings.add("");
+            loreStrings.add("§eWorkplace Location:");
             if (info.workplaceLocation != null) {
-                lore.add("§7  X: §f" + info.workplaceLocation.getBlockX());
-                lore.add("§7  Y: §f" + info.workplaceLocation.getBlockY());
-                lore.add("§7  Z: §f" + info.workplaceLocation.getBlockZ());
+                loreStrings.add("§7  X: §f" + info.workplaceLocation.getBlockX());
+                loreStrings.add("§7  Y: §f" + info.workplaceLocation.getBlockY());
+                loreStrings.add("§7  Z: §f" + info.workplaceLocation.getBlockZ());
             } else {
-                lore.add("§c  No workplace assigned");
+                loreStrings.add("§c  No workplace assigned");
             }
-            lore.add("");
+            loreStrings.add("");
             String professionName = getProfessionKey(info.profession);
-            lore.add("§7Profession: §b" + professionName);
+            loreStrings.add("§7Profession: §b" + professionName);
             
-            meta.setLore(lore);
+            List<Component> loreComponents = new ArrayList<>();
+            for (String line : loreStrings) {
+                loreComponents.add(LegacyComponentSerializer.legacySection().deserialize(line));
+            }
+            meta.lore(loreComponents);
             item.setItemMeta(meta);
         }
         
@@ -243,12 +256,16 @@ public class VillageMenuGUI {
             }
             return key.getKey();
         } catch (Exception e) {
-            // Fallback: try to get enum name
+            // Fallback: try to get key
             try {
-                return profession.name().toLowerCase();
+                org.bukkit.NamespacedKey key = profession.getKey();
+                if (key != null) {
+                    return key.getKey();
+                }
             } catch (Exception e2) {
-                return "NONE";
+                // Ignore
             }
+            return "NONE";
         }
     }
     

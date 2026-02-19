@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.World;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Villager;
@@ -61,16 +63,17 @@ public class VillagerListener implements Listener {
     }
 
     private boolean needsName(Villager villager) {
-        return villager.getCustomName() == null || villager.getCustomName().isEmpty();
+        Component customName = villager.customName();
+        return customName == null || LegacyComponentSerializer.legacySection().serialize(customName).isEmpty();
     }
 
     private void nameVillager(Villager villager) {
         String firstName = firstNames[random.nextInt(firstNames.length)];
 
         // Format: FirstName the ProfessionName
-        String fullName = "§6" + firstName;
+        Component fullName = LegacyComponentSerializer.legacySection().deserialize("§6" + firstName);
 
-        villager.setCustomName(fullName);
+        villager.customName(fullName);
         villager.setCustomNameVisible(true);
     }
 }

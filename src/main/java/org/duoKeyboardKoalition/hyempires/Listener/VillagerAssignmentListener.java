@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -85,8 +87,9 @@ public class VillagerAssignmentListener implements Listener {
             // Store assignment data temporarily (using metadata or a map)
             plugin.getServer().getScheduler().runTask(plugin, () -> {
                 // Store in a simple way - we'll use player metadata
-                player.setMetadata("hyempires_assigning_bed", 
-                    new org.bukkit.metadata.FixedMetadataValue(plugin, block.getLocation()));
+                @SuppressWarnings("deprecation")
+                org.bukkit.metadata.FixedMetadataValue metaValue = new org.bukkit.metadata.FixedMetadataValue(plugin, block.getLocation());
+                player.setMetadata("hyempires_assigning_bed", metaValue);
             });
             
             return;
@@ -100,8 +103,9 @@ public class VillagerAssignmentListener implements Listener {
             
             // Store assignment data
             plugin.getServer().getScheduler().runTask(plugin, () -> {
-                player.setMetadata("hyempires_assigning_workstation", 
-                    new org.bukkit.metadata.FixedMetadataValue(plugin, block.getLocation()));
+                @SuppressWarnings("deprecation")
+                org.bukkit.metadata.FixedMetadataValue metaValue = new org.bukkit.metadata.FixedMetadataValue(plugin, block.getLocation());
+                player.setMetadata("hyempires_assigning_workstation", metaValue);
             });
             
             return;
@@ -123,6 +127,7 @@ public class VillagerAssignmentListener implements Listener {
         if (player.hasMetadata("hyempires_assigning_bed")) {
             event.setCancelled(true);
             
+            @SuppressWarnings("deprecation")
             org.bukkit.metadata.MetadataValue metadata = player.getMetadata("hyempires_assigning_bed").get(0);
             org.bukkit.Location bedLocation = (org.bukkit.Location) metadata.value();
             
@@ -139,6 +144,7 @@ public class VillagerAssignmentListener implements Listener {
         if (player.hasMetadata("hyempires_assigning_workstation")) {
             event.setCancelled(true);
             
+            @SuppressWarnings("deprecation")
             org.bukkit.metadata.MetadataValue metadata = player.getMetadata("hyempires_assigning_workstation").get(0);
             org.bukkit.Location workstationLocation = (org.bukkit.Location) metadata.value();
             
@@ -169,7 +175,8 @@ public class VillagerAssignmentListener implements Listener {
             return;
         }
         
-        String villagerName = villager.getCustomName() != null ? villager.getCustomName() : "Villager";
+        Component customName = villager.customName();
+        String villagerName = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : "Villager";
         UUID uuid = villager.getUniqueId();
         
         // Get villager data
@@ -232,7 +239,8 @@ public class VillagerAssignmentListener implements Listener {
                 villager.sleep(bedLocation);
             }
             
-            String villagerName = villager.getCustomName() != null ? villager.getCustomName() : "Villager";
+            Component customName = villager.customName();
+        String villagerName = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : "Villager";
             player.sendMessage("§a§lBed Assigned!");
             player.sendMessage("§7Assigned bed at §f" + bedLocation.getBlockX() + ", " + 
                              bedLocation.getBlockY() + ", " + bedLocation.getBlockZ() + 
@@ -270,7 +278,8 @@ public class VillagerAssignmentListener implements Listener {
             Material workstationType = workstationBlock.getType();
             updateVillagerProfession(villager, workstationType);
             
-            String villagerName = villager.getCustomName() != null ? villager.getCustomName() : "Villager";
+            Component customName = villager.customName();
+        String villagerName = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : "Villager";
             player.sendMessage("§a§lWorkstation Assigned!");
             player.sendMessage("§7Assigned workstation at §f" + workstationLocation.getBlockX() + ", " + 
                              workstationLocation.getBlockY() + ", " + workstationLocation.getBlockZ() + 

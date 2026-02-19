@@ -1,5 +1,7 @@
 package org.duoKeyboardKoalition.hyempires.scanners;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.*;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
@@ -69,6 +71,14 @@ public class VillagerJobScanner implements Listener {
         loadExistingData();
         startPeriodicScanning();
     }
+    
+    /**
+     * Helper: Get villager name as string from Component.
+     */
+    private String getVillagerNameString(Villager villager) {
+        Component customName = villager.customName();
+        return customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : null;
+    }
 
     @SuppressWarnings("unchecked")
     private void loadExistingData() {
@@ -117,7 +127,8 @@ public class VillagerJobScanner implements Listener {
                             org.bukkit.block.Block workstationBlock = jobSiteLoc.getBlock();
                             if (isWorkstationBlock(workstationBlock.getType())) {
                                 workstationBlock.breakNaturally();
-                                plugin.getLogger().info("Removed workstation outside village territory for villager " + villager.getCustomName());
+                                String nameStr = getVillagerNameString(villager);
+                                plugin.getLogger().info("Removed workstation outside village territory for villager " + (nameStr != null ? nameStr : "Unknown"));
                             }
                         }
                     }
@@ -238,8 +249,10 @@ public class VillagerJobScanner implements Listener {
         boolean changed = false;
 
         // Update name if changed
-        String currentName = villager.getCustomName() != null ?
-                villager.getCustomName() : "Villager-" + uuid.toString().substring(0, 8);
+        String currentName = getVillagerNameString(villager);
+        if (currentName == null) {
+            currentName = "Villager-" + uuid.toString().substring(0, 8);
+        }
         if (!currentName.equals(data.name)) {
             data.name = currentName;
             changed = true;
@@ -325,23 +338,34 @@ public class VillagerJobScanner implements Listener {
                 // Try to parse as NamespacedKey first (e.g., "minecraft:farmer")
                 if (professionStr.contains(":")) {
                     NamespacedKey key = NamespacedKey.fromString(professionStr);
-                    // Find profession by key
-                    for (Villager.Profession prof : Villager.Profession.values()) {
+                    // Find profession by key using registry
+                    try {
+                        org.bukkit.Registry<Villager.Profession> registry = org.bukkit.Registry.VILLAGER_PROFESSION;
+                        Villager.Profession prof = registry.get(key);
+                        if (prof != null) {
+                            data.profession = prof;
+                        }
+                    } catch (Exception e) {
+                        // Fallback: iterate through registry
                         try {
-                            NamespacedKey profKey = prof.getKey();
-                            if (profKey != null && profKey.equals(key)) {
-                                data.profession = prof;
-                                break;
+                            org.bukkit.Registry<Villager.Profession> registry = org.bukkit.Registry.VILLAGER_PROFESSION;
+                            for (Villager.Profession prof : registry) {
+                                NamespacedKey profKey = prof.getKey();
+                                if (profKey != null && profKey.equals(key)) {
+                                    data.profession = prof;
+                                    break;
+                                }
                             }
-                        } catch (Exception e) {
-                            // Skip this profession if getKey() fails
-                            continue;
+                        } catch (Exception e2) {
+                            data.profession = null;
                         }
                     }
                 } else {
-                    // Fallback: try direct enum value
+                    // Fallback: try direct enum value (deprecated but needed for backward compatibility)
                     try {
-                        data.profession = Villager.Profession.valueOf(professionStr.toUpperCase());
+                        @SuppressWarnings("deprecation")
+                        Villager.Profession prof = Villager.Profession.valueOf(professionStr.toUpperCase());
+                        data.profession = prof;
                     } catch (IllegalArgumentException e) {
                         data.profession = null;
                     }
@@ -396,8 +420,8 @@ public class VillagerJobScanner implements Listener {
         VillagerData data = villagerDataMap.computeIfAbsent(uuid, k -> {
             VillagerData newData = new VillagerData();
             newData.uuid = uuid;
-            newData.name = villager.getCustomName() != null ? villager.getCustomName() : 
-                          "Villager-" + uuid.toString().substring(0, 8);
+            String name = getVillagerNameString(villager);
+            newData.name = name != null ? name : "Villager-" + uuid.toString().substring(0, 8);
             return newData;
         });
         
@@ -414,8 +438,8 @@ public class VillagerJobScanner implements Listener {
         VillagerData data = villagerDataMap.computeIfAbsent(uuid, k -> {
             VillagerData newData = new VillagerData();
             newData.uuid = uuid;
-            newData.name = villager.getCustomName() != null ? villager.getCustomName() : 
-                          "Villager-" + uuid.toString().substring(0, 8);
+            String name = getVillagerNameString(villager);
+            newData.name = name != null ? name : "Villager-" + uuid.toString().substring(0, 8);
             return newData;
         });
         
