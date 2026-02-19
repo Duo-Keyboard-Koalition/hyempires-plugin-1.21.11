@@ -156,12 +156,33 @@ public class InfluenceManager {
     
     /**
      * Initialize founder influence when a village is created.
+     * @param villageName Name of the village
+     * @param founderUsername Username of the founder
+     * @param founderUUID UUID of the founder
      */
-    public void initializeFounder(String villageName, UUID founderUUID) {
+    public void initializeFounder(String villageName, String founderUsername, UUID founderUUID) {
         Map<UUID, InfluenceData> influences = villageInfluences.computeIfAbsent(villageName, k -> new ConcurrentHashMap<>());
         long now = System.currentTimeMillis();
         influences.put(founderUUID, new InfluenceData(100.0, now, true));
         saveData();
+    }
+    
+    /**
+     * Get UUID from username (for backward compatibility and founder lookup).
+     */
+    private UUID getUUIDFromUsername(String username) {
+        if (username == null) return null;
+        // Try to find online player first
+        org.bukkit.entity.Player player = plugin.getServer().getPlayerExact(username);
+        if (player != null) {
+            return player.getUniqueId();
+        }
+        // Try offline player
+        org.bukkit.OfflinePlayer offlinePlayer = plugin.getServer().getOfflinePlayer(username);
+        if (offlinePlayer != null && offlinePlayer.hasPlayedBefore()) {
+            return offlinePlayer.getUniqueId();
+        }
+        return null;
     }
     
     /**

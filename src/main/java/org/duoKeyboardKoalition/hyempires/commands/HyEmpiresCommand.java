@@ -103,7 +103,7 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
         }
         player.sendMessage("§6=== Villages === §7(" + villages.size() + ")");
         for (VillageManager.VillageData v : villages) {
-            String ownerStr = v.owner != null && v.owner.equals(player.getUniqueId()) ? "§a(you)" : "";
+            String ownerStr = v.owner != null && v.owner.equals(player.getName()) ? "§a(you)" : "";
             player.sendMessage("§f" + v.name + " §7- Pop: " + v.population + " §7@ " + v.adminX + "," + v.adminY + "," + v.adminZ + " " + ownerStr);
         }
     }
@@ -335,8 +335,11 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
             long hoursSinceActivity = (System.currentTimeMillis() - entry.getValue().lastActivity) / (60 * 60 * 1000);
             String activityStr = hoursSinceActivity < 1 ? "Active now" : hoursSinceActivity + "h ago";
             
+            // Get username from UUID
+            String displayName = getUsernameFromUUID(entry.getKey());
+            
             player.sendMessage(String.format("§7%d. §f%s §7- §e%.1f §7influence §7(%s)%s%s",
-                    rank, entry.getKey().toString().substring(0, 8), entry.getValue().influence, activityStr, founderTag, youTag));
+                    rank, displayName, entry.getValue().influence, activityStr, founderTag, youTag));
             rank++;
             if (rank > 10) break; // Top 10
         }
@@ -409,5 +412,24 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
             }
         }
         return completions;
+    }
+    
+    /**
+     * Get username from UUID, with fallback to UUID string.
+     */
+    private String getUsernameFromUUID(UUID uuid) {
+        if (uuid == null) return "Unknown";
+        // Try to find online player first
+        org.bukkit.entity.Player player = plugin.getServer().getPlayer(uuid);
+        if (player != null) {
+            return player.getName();
+        }
+        // Try offline player
+        org.bukkit.OfflinePlayer offlinePlayer = plugin.getServer().getOfflinePlayer(uuid);
+        if (offlinePlayer != null && offlinePlayer.hasPlayedBefore() && offlinePlayer.getName() != null) {
+            return offlinePlayer.getName();
+        }
+        // Fallback to UUID string (first 8 chars)
+        return uuid.toString().substring(0, 8);
     }
 }

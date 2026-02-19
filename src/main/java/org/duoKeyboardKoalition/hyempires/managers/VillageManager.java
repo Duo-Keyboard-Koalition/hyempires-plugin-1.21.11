@@ -49,7 +49,7 @@ public class VillageManager {
         public int adminX, adminY, adminZ; // Primary bell location
         public List<Location> additionalBells = new ArrayList<>(); // Additional bells that expanded the village
         public int effectiveRadius = 48; // Can expand beyond base 48 blocks
-        public UUID owner;
+        public String owner; // Founder username
         public long createdDate;
         public int population;
         public boolean active;
@@ -74,7 +74,7 @@ public class VillageManager {
                     adminX,
                     adminY,
                     adminZ,
-                    owner != null ? owner.toString() : "none",
+                    owner != null ? owner : "none",
                     createdDate,
                     population,
                     active,
@@ -91,7 +91,21 @@ public class VillageManager {
                 adminX = Integer.parseInt(parts[2]);
                 adminY = Integer.parseInt(parts[3]);
                 adminZ = Integer.parseInt(parts[4]);
-                owner = !parts[5].equals("none") ? UUID.fromString(parts[5]) : null;
+                // Try to parse as UUID first (for backward compatibility), then as username
+                if (!parts[5].equals("none")) {
+                    try {
+                        // Try UUID first (old format)
+                        UUID uuid = UUID.fromString(parts[5]);
+                        // Convert UUID to username if possible
+                        org.bukkit.OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(uuid);
+                        owner = offlinePlayer.getName() != null ? offlinePlayer.getName() : parts[5];
+                    } catch (IllegalArgumentException e) {
+                        // Not a UUID, treat as username
+                        owner = parts[5];
+                    }
+                } else {
+                    owner = null;
+                }
                 createdDate = Long.parseLong(parts[6]);
                 population = Integer.parseInt(parts[7]);
                 active = Boolean.parseBoolean(parts[8]);
@@ -205,7 +219,7 @@ public class VillageManager {
         nbt.put("adminX", data.adminX);
         nbt.put("adminY", data.adminY);
         nbt.put("adminZ", data.adminZ);
-        nbt.put("owner", data.owner != null ? data.owner.toString() : null);
+        nbt.put("owner", data.owner);
         nbt.put("createdDate", data.createdDate);
         nbt.put("population", data.population);
         nbt.put("active", data.active);
@@ -235,10 +249,16 @@ public class VillageManager {
         
         Object ownerObj = nbt.get("owner");
         if (ownerObj != null) {
+            String ownerStr = ownerObj.toString();
+            // Try to parse as UUID first (for backward compatibility)
             try {
-                data.owner = UUID.fromString(ownerObj.toString());
+                UUID uuid = UUID.fromString(ownerStr);
+                // Convert UUID to username if possible
+                org.bukkit.OfflinePlayer offlinePlayer = Bukkit.getOfflinePlayer(uuid);
+                data.owner = offlinePlayer.getName() != null ? offlinePlayer.getName() : ownerStr;
             } catch (IllegalArgumentException e) {
-                data.owner = null;
+                // Not a UUID, treat as username
+                data.owner = ownerStr;
             }
         }
         
@@ -285,7 +305,7 @@ public class VillageManager {
         data.adminX = adminBlockLocation.getBlockX();
         data.adminY = adminBlockLocation.getBlockY();
         data.adminZ = adminBlockLocation.getBlockZ();
-        data.owner = owner.getUniqueId();
+        data.owner = owner.getName();
         data.createdDate = System.currentTimeMillis();
         data.population = countVillagersInRadius(adminBlockLocation, 48);
         data.active = true;
@@ -295,7 +315,7 @@ public class VillageManager {
         
         // Initialize founder influence
         if (influenceManager != null) {
-            influenceManager.initializeFounder(data.name, owner.getUniqueId());
+            influenceManager.initializeFounder(data.name, owner.getName(), owner.getUniqueId());
         }
         
         // Initialize chunk territory (claim the chunk containing the bell)
@@ -468,14 +488,35 @@ public class VillageManager {
     }
 
     /**
-     * Gets all villages owned by a player.
+     * Gets all villages owned by a player (by username).
      */
-    public List<VillageData> getVillagesByOwner(UUID owner) {
+    public List<VillageData> getVillagesByOwner(String ownerUsername) {
         List<VillageData> result = new ArrayList<>();
         for (VillageData data : villages) {
-            if (data.active && data.owner != null && data.owner.equals(owner)) {
+            if (data.active && data.owner != null && data.owner.equals(ownerUsername)) {
                 result.add(data);
             }
+        }
+        return result;
+    }
+    
+    /**
+     * Gets all villages owned by a player (by UUID, for backward compatibility).
+     */
+    public List<VillageData> getVillagesByOwnerUUID(UUID ownerUUID) {
+        List<VillageData> result = new ArrayList<>();
+        if (ownerUUID == null) return result;
+        
+        // Get username from UUID
+        org.bukkit.entity.Player player = plugin.getServer().getPlayer(ownerUUID);
+        String username = player != null ? player.getName() : null;
+        if (username == null) {
+            org.bukkit.OfflinePlayer offlinePlayer = plugin.getServer().getOfflinePlayer(ownerUUID);
+            username = offlinePlayer != null && offlinePlayer.hasPlayedBefore() ? offlinePlayer.getName() : null;
+        }
+        
+        if (username != null) {
+            return getVillagesByOwner(username);
         }
         return result;
     }
@@ -556,9 +597,9 @@ public class VillageManager {
             }
         }
         
-        // Legacy owner field (for backward compatibility)
+        // Founder field
         if (data.owner != null) {
-            info.append("§eFounder: §f").append(data.owner.toString()).append("\n");
+            info.append("§eFounder: §f").append(data.owner).append("\n");
         }
         
         info.append("§ePopulation: §f").append(data.population).append(" villagers\n");
@@ -594,7 +635,9 @@ public class VillageManager {
                 for (Map.Entry<UUID, InfluenceManager.InfluenceData> entry : ranking) {
                     if (count >= 5) break; // Top 5
                     String founderTag = entry.getValue().isFounder ? " §6[Founder]" : "";
-                    info.append("\n§7").append(count + 1).append(". §f").append(entry.getKey().toString().substring(0, 8))
+                    // Get username from UUID
+                    String displayName = getUsernameFromUUID(entry.getKey());
+                    info.append("\n§7").append(count + 1).append(". §f").append(displayName)
                             .append(" §7- ").append(String.format("%.1f", entry.getValue().influence)).append(" influence").append(founderTag);
                     count++;
                 }
@@ -678,8 +721,27 @@ public class VillageManager {
         if (player.isOp()) return true;
         if (influenceManager == null) {
             // Fallback to old system if influence manager not initialized
-            return village.owner == null || village.owner.equals(player.getUniqueId());
+            return village.owner == null || village.owner.equals(player.getName());
         }
         return influenceManager.canAdminister(player, village.name);
+    }
+    
+    /**
+     * Get username from UUID, with fallback to UUID string.
+     */
+    private String getUsernameFromUUID(UUID uuid) {
+        if (uuid == null) return "Unknown";
+        // Try to find online player first
+        org.bukkit.entity.Player player = plugin.getServer().getPlayer(uuid);
+        if (player != null) {
+            return player.getName();
+        }
+        // Try offline player
+        org.bukkit.OfflinePlayer offlinePlayer = plugin.getServer().getOfflinePlayer(uuid);
+        if (offlinePlayer != null && offlinePlayer.hasPlayedBefore() && offlinePlayer.getName() != null) {
+            return offlinePlayer.getName();
+        }
+        // Fallback to UUID string (first 8 chars)
+        return uuid.toString().substring(0, 8);
     }
 }
