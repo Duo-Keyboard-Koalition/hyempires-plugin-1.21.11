@@ -106,34 +106,34 @@ public class InfluenceManager {
                 String line;
                 boolean firstLine = true;
                 while ((line = reader.readLine()) != null) {
-                if (firstLine) {
-                    firstLine = false;
-                    continue; // Skip header
-                }
-                if (!line.trim().isEmpty()) {
-                    String[] parts = line.split(",");
-                    if (parts.length >= 5) {
-                        String villageName = parts[0];
-                        UUID playerUUID = UUID.fromString(parts[1]);
-                        InfluenceData data = InfluenceData.fromCsvLine(parts);
-                        if (data != null) {
-                            villageInfluences.computeIfAbsent(villageName, k -> new ConcurrentHashMap<>())
-                                    .put(playerUUID, data);
+                    if (firstLine) {
+                        firstLine = false;
+                        continue; // Skip header
+                    }
+                    if (!line.trim().isEmpty()) {
+                        String[] parts = line.split(",");
+                        if (parts.length >= 5) {
+                            String villageName = parts[0];
+                            UUID playerUUID = UUID.fromString(parts[1]);
+                            InfluenceData data = InfluenceData.fromCsvLine(parts);
+                            if (data != null) {
+                                villageInfluences.computeIfAbsent(villageName, k -> new ConcurrentHashMap<>())
+                                        .put(playerUUID, data);
+                            }
                         }
                     }
                 }
+                plugin.getLogger().info("Migrated influence data from CSV to NBT for " + villageInfluences.size() + " villages");
+                saveData(); // Save to NBT format
+            } catch (IOException e) {
+                plugin.getLogger().severe("Failed to load influence data from CSV: " + e.getMessage());
             }
-            plugin.getLogger().info("Migrated influence data from CSV to NBT for " + villageInfluences.size() + " villages");
-            saveData(); // Save to NBT format
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to load influence data from CSV: " + e.getMessage());
         }
     }
     
     /**
      * Convert InfluenceData to NBT map.
      */
-    @SuppressWarnings("unchecked")
     private Map<String, Object> toNBT(String villageName, UUID playerUUID, InfluenceData data) {
         Map<String, Object> nbt = new HashMap<>();
         nbt.put("villageName", villageName);
@@ -147,7 +147,6 @@ public class InfluenceManager {
     /**
      * Convert NBT map to InfluenceData.
      */
-    @SuppressWarnings("unchecked")
     private InfluenceData fromNBT(Map<String, Object> nbt) {
         double influence = ((Number) nbt.getOrDefault("influence", 0.0)).doubleValue();
         long lastActivity = ((Number) nbt.getOrDefault("lastActivity", System.currentTimeMillis())).longValue();
@@ -339,7 +338,6 @@ public class InfluenceManager {
     }
     
     private void saveData() {
-        List<String> lines = new ArrayList<>();
         List<Map<String, Object>> nbtInfluences = new ArrayList<>();
         for (Map.Entry<String, Map<UUID, InfluenceData>> villageEntry : villageInfluences.entrySet()) {
             String villageName = villageEntry.getKey();

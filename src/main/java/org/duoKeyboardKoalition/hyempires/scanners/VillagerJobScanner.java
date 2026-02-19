@@ -40,12 +40,12 @@ public class VillagerJobScanner implements Listener {
     //       status: ALIVE
 
     public class VillagerData {
-        String name;
-        UUID uuid;
-        Location jobsite;
-        Villager.Profession profession;
-        Location bed;
-        String status = "ALIVE";
+        public String name;
+        public UUID uuid;
+        public Location jobsite;
+        public Villager.Profession profession;
+        public Location bed;
+        public String status = "ALIVE";
 
         public String toCsvString() {
             return String.format("%s,%s,%s,%s,%s,%s,%s,%s,%s,%s",
@@ -107,8 +107,10 @@ public class VillagerJobScanner implements Listener {
                 if (plugin instanceof HyEmpiresPlugin) {
                     HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
                     
-                    org.bukkit.Location jobSiteLoc = villager.getWorkstation();
-                    if (jobSiteLoc != null) {
+                    // Get job site from stored data
+                    VillagerData data = villagerDataMap.get(villager.getUniqueId());
+                    if (data != null && data.jobsite != null) {
+                        org.bukkit.Location jobSiteLoc = data.jobsite;
                         String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
                         if (villageName == null) {
                             // Job site is outside village territory - break it
@@ -170,9 +172,10 @@ public class VillagerJobScanner implements Listener {
         if (plugin instanceof HyEmpiresPlugin) {
             HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
             
-            // Get villager's job site location (if available)
-            org.bukkit.Location jobSiteLoc = villager.getWorkstation();
-            if (jobSiteLoc != null) {
+            // Get villager's job site location from stored data
+            VillagerData data = villagerDataMap.get(villager.getUniqueId());
+            if (data != null && data.jobsite != null) {
+                org.bukkit.Location jobSiteLoc = data.jobsite;
                 // Check if job site is in village territory
                 String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
                 
@@ -227,23 +230,8 @@ public class VillagerJobScanner implements Listener {
             changed = true;
         }
         
-        // Update workstation location if available
-        Location workstationLoc = villager.getWorkstation();
-        if (workstationLoc != null) {
-            if (data.jobsite == null || !data.jobsite.equals(workstationLoc)) {
-                data.jobsite = workstationLoc.clone();
-                changed = true;
-            }
-        }
-        
-        // Update bed location if available (check if villager has a bed)
-        Location bedLoc = villager.getBedLocation();
-        if (bedLoc != null) {
-            if (data.bed == null || !data.bed.equals(bedLoc)) {
-                data.bed = bedLoc.clone();
-                changed = true;
-            }
-        }
+        // Note: Workstation and bed locations are tracked through events and manual assignment
+        // They are not directly accessible via villager API in newer versions
 
         if (changed) {
             updateCsv();

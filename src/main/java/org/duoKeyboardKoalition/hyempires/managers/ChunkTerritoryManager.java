@@ -2,7 +2,6 @@ package org.duoKeyboardKoalition.hyempires.managers;
 
 import org.bukkit.Chunk;
 import org.bukkit.Location;
-import org.bukkit.World;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.duoKeyboardKoalition.hyempires.utils.NBTFileManager;
 
@@ -108,11 +107,11 @@ public class ChunkTerritoryManager {
         File oldCsvFile = new File(plugin.getDataFolder(), "village_chunks.csv");
         if (oldCsvFile.exists()) {
             File dataFile = oldCsvFile;
-        if (!dataFile.exists()) {
-            return;
-        }
-        
-        try (BufferedReader reader = new BufferedReader(new FileReader(dataFile))) {
+            if (!dataFile.exists()) {
+                return;
+            }
+            
+            try (BufferedReader reader = new BufferedReader(new FileReader(dataFile))) {
             String line;
             boolean firstLine = true;
             while ((line = reader.readLine()) != null) {
@@ -134,10 +133,11 @@ public class ChunkTerritoryManager {
                     }
                 }
             }
-            plugin.getLogger().info("Migrated chunk territory from CSV to NBT for " + villageChunks.size() + " villages");
-            saveData(); // Save to NBT format
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to load chunk territory from CSV: " + e.getMessage());
+                plugin.getLogger().info("Migrated chunk territory from CSV to NBT for " + villageChunks.size() + " villages");
+                saveData(); // Save to NBT format
+            } catch (IOException e) {
+                plugin.getLogger().severe("Failed to load chunk territory from CSV: " + e.getMessage());
+            }
         }
     }
     

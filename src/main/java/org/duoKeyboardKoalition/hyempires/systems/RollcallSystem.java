@@ -248,8 +248,13 @@ public class RollcallSystem {
         }
         
         // Find villagers within effective radius
-        Collection<Villager> nearbyVillagers = bellLocation.getWorld()
-            .getNearbyEntities(bellLocation, village.effectiveRadius, 256, village.effectiveRadius, Villager.class);
+        Collection<Villager> nearbyVillagers = new ArrayList<>();
+        for (org.bukkit.entity.Entity entity : bellLocation.getWorld()
+            .getNearbyEntities(bellLocation, village.effectiveRadius, 256, village.effectiveRadius)) {
+            if (entity instanceof Villager) {
+                nearbyVillagers.add((Villager) entity);
+            }
+        }
         
         villagers.addAll(nearbyVillagers);
         return villagers;

@@ -3,6 +3,7 @@ package org.duoKeyboardKoalition.hyempires.gui;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 import org.bukkit.inventory.Inventory;
@@ -118,8 +119,13 @@ public class VillageMenuGUI {
         Map<UUID, VillagerJobScanner.VillagerData> villagerData = scanner != null ? scanner.getVillagerData() : new HashMap<>();
         
         // Find all villagers within village radius
-        Collection<Villager> nearbyVillagers = adminLoc.getWorld()
-            .getNearbyEntities(adminLoc, village.effectiveRadius, 256, village.effectiveRadius, Villager.class);
+        Collection<Villager> nearbyVillagers = new ArrayList<>();
+        for (org.bukkit.entity.Entity entity : adminLoc.getWorld()
+            .getNearbyEntities(adminLoc, village.effectiveRadius, 256, village.effectiveRadius)) {
+            if (entity instanceof Villager) {
+                nearbyVillagers.add((Villager) entity);
+            }
+        }
         
         for (Villager villager : nearbyVillagers) {
             UUID uuid = villager.getUniqueId();
@@ -202,20 +208,21 @@ public class VillageMenuGUI {
     private Material getProfessionIcon(Villager.Profession profession) {
         if (profession == null) return Material.VILLAGER_SPAWN_EGG;
         
-        switch (profession) {
-            case FARMER: return Material.WHEAT;
-            case FISHERMAN: return Material.FISHING_ROD;
-            case SHEPHERD: return Material.WHITE_WOOL;
-            case FLETCHER: return Material.ARROW;
-            case LIBRARIAN: return Material.BOOK;
-            case CARTOGRAPHER: return Material.MAP;
-            case CLERIC: return Material.BREWING_STAND;
-            case ARMORER: return Material.IRON_CHESTPLATE;
-            case WEAPONSMITH: return Material.IRON_SWORD;
-            case TOOLSMITH: return Material.IRON_PICKAXE;
-            case BUTCHER: return Material.COOKED_BEEF;
-            case LEATHERWORKER: return Material.LEATHER;
-            case MASON: return Material.STONE;
+        String professionName = profession.getKey().getKey().toUpperCase();
+        switch (professionName) {
+            case "FARMER": return Material.WHEAT;
+            case "FISHERMAN": return Material.FISHING_ROD;
+            case "SHEPHERD": return Material.WHITE_WOOL;
+            case "FLETCHER": return Material.ARROW;
+            case "LIBRARIAN": return Material.BOOK;
+            case "CARTOGRAPHER": return Material.MAP;
+            case "CLERIC": return Material.BREWING_STAND;
+            case "ARMORER": return Material.IRON_CHESTPLATE;
+            case "WEAPONSMITH": return Material.IRON_SWORD;
+            case "TOOLSMITH": return Material.IRON_PICKAXE;
+            case "BUTCHER": return Material.COOKED_BEEF;
+            case "LEATHERWORKER": return Material.LEATHER;
+            case "MASON": return Material.STONE;
             default: return Material.VILLAGER_SPAWN_EGG;
         }
     }

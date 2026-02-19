@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -241,6 +242,44 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
         player.sendMessage("§7Right-click chunks to claim, Left-click to unclaim");
         player.sendMessage("§7Shift+Right-click to see chunk info");
         return true;
+    }
+    
+    private boolean handleVillager(CommandSender sender, String[] args) {
+        if (!(sender instanceof Player)) {
+            sender.sendMessage("§cThis command must be run by a player.");
+            return true;
+        }
+        Player player = (Player) sender;
+        
+        if (args.length < 2) {
+            player.sendMessage("§eUsage: §f/hyempires villager <info|assign>");
+            player.sendMessage("§7  info - Show villager information (right-click a villager)");
+            player.sendMessage("§7  assign - Instructions for assigning beds/workstations");
+            return true;
+        }
+        
+        String action = args[1].toLowerCase();
+        
+        switch (action) {
+            case "info":
+                player.sendMessage("§aRight-click a villager to view their bed and workstation locations!");
+                return true;
+            case "assign":
+                player.sendMessage("§6=== Villager Assignment Guide ===");
+                player.sendMessage("§eTo assign a bed:");
+                player.sendMessage("§7  1. Hold a §fstick §7in your hand");
+                player.sendMessage("§7  2. Right-click a §fbed");
+                player.sendMessage("§7  3. Right-click the §evillager §7you want to assign it to");
+                player.sendMessage("");
+                player.sendMessage("§eTo assign a workstation:");
+                player.sendMessage("§7  1. Hold a §fstick §7in your hand");
+                player.sendMessage("§7  2. Right-click a §fworkstation block");
+                player.sendMessage("§7  3. Right-click the §evillager §7you want to assign it to");
+                return true;
+            default:
+                player.sendMessage("§cUnknown villager action. Use §finfo§c or §fassign§c.");
+                return true;
+        }
     }
     
     private boolean handleReload(CommandSender sender) {

@@ -1,5 +1,6 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
+import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -181,7 +182,7 @@ public class VillagerAssignmentListener implements Listener {
         player.sendMessage("");
         
         // Bed location
-        Location bedLoc = scanner.getVillagerBedLocation(villager);
+        org.bukkit.Location bedLoc = scanner.getVillagerBedLocation(villager);
         if (bedLoc != null) {
             player.sendMessage("§aBed Location:");
             player.sendMessage("§7  World: §f" + bedLoc.getWorld().getName());
@@ -195,7 +196,7 @@ public class VillagerAssignmentListener implements Listener {
         player.sendMessage("");
         
         // Workstation location
-        Location workstationLoc = scanner.getVillagerWorkstationLocation(villager);
+        org.bukkit.Location workstationLoc = scanner.getVillagerWorkstationLocation(villager);
         if (workstationLoc != null) {
             player.sendMessage("§aWorkstation Location:");
             player.sendMessage("§7  World: §f" + workstationLoc.getWorld().getName());
@@ -260,13 +261,8 @@ public class VillagerAssignmentListener implements Listener {
         boolean success = scanner.assignWorkstation(villager, workstationLocation);
         
         if (success) {
-            // Try to set villager's workstation (if API supports it)
-            try {
-                villager.setWorkstation(workstationLocation);
-            } catch (Exception e) {
-                // Fallback: villager will claim it naturally
-                plugin.getLogger().info("Could not directly set workstation, villager will claim naturally");
-            }
+            // Note: setWorkstation() is not available in Bukkit API
+            // Villager will claim the workstation naturally when they pathfind to it
             
             // Update profession based on workstation type
             Material workstationType = workstationBlock.getType();
