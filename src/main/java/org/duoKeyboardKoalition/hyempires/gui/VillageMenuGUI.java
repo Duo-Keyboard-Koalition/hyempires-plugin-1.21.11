@@ -193,7 +193,9 @@ public class VillageMenuGUI {
                 lore.add("§c  No workplace assigned");
             }
             lore.add("");
-            lore.add("§7Profession: §b" + (info.profession != null ? info.profession.name() : "NONE"));
+            String professionName = info.profession != null ? 
+                info.profession.getKey().getKey() : "NONE";
+            lore.add("§7Profession: §b" + professionName);
             
             meta.setLore(lore);
             item.setItemMeta(meta);

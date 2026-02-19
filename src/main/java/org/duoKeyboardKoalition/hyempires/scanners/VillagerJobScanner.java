@@ -54,7 +54,7 @@ public class VillagerJobScanner implements Listener {
                     jobsite != null ? jobsite.getBlockX() : "null",
                     jobsite != null ? jobsite.getBlockY() : "null",
                     jobsite != null ? jobsite.getBlockZ() : "null",
-                    profession != null ? profession.getKeyOrThrow().getKey() : "NONE",
+                    profession != null ? profession.getKey().getKey() : "NONE",
                     bed != null ? bed.getBlockX() : "null",
                     bed != null ? bed.getBlockY() : "null",
                     bed != null ? bed.getBlockZ() : "null",
@@ -261,7 +261,7 @@ public class VillagerJobScanner implements Listener {
             nbt.put("jobsite", null);
         }
         
-        nbt.put("profession", data.profession != null ? data.profession.getKeyOrThrow().getKey() : "NONE");
+        nbt.put("profession", data.profession != null ? data.profession.getKey().getKey() : "NONE");
         
         if (data.bed != null) {
             nbt.put("bed", NBTFileManager.locationToNBT(data.bed));
@@ -298,8 +298,20 @@ public class VillagerJobScanner implements Listener {
         String professionStr = (String) nbt.getOrDefault("profession", "NONE");
         if (!professionStr.equals("NONE")) {
             try {
-                NamespacedKey key = NamespacedKey.fromString(professionStr);
-                data.profession = Villager.Profession.valueOf(key.getKey().toUpperCase());
+                // Try to parse as NamespacedKey first (e.g., "minecraft:farmer")
+                if (professionStr.contains(":")) {
+                    NamespacedKey key = NamespacedKey.fromString(professionStr);
+                    // Find profession by key
+                    for (Villager.Profession prof : Villager.Profession.values()) {
+                        if (prof.getKey().equals(key)) {
+                            data.profession = prof;
+                            break;
+                        }
+                    }
+                } else {
+                    // Fallback: try direct enum value
+                    data.profession = Villager.Profession.valueOf(professionStr.toUpperCase());
+                }
             } catch (Exception e) {
                 data.profession = null;
             }

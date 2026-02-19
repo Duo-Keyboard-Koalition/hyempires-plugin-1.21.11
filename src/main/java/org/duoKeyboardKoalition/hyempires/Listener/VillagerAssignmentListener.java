@@ -178,7 +178,9 @@ public class VillagerAssignmentListener implements Listener {
         player.sendMessage("§6=== Villager Information ===");
         player.sendMessage("§eName: §f" + villagerName);
         player.sendMessage("§eUUID: §7" + uuid.toString().substring(0, 8) + "...");
-        player.sendMessage("§eProfession: §b" + (villager.getProfession() != null ? villager.getProfession().name() : "NONE"));
+        String professionName = villager.getProfession() != null ? 
+            villager.getProfession().getKey().getKey() : "NONE";
+        player.sendMessage("§eProfession: §b" + professionName);
         player.sendMessage("");
         
         // Bed location
