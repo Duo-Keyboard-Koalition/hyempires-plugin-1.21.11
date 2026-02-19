@@ -193,8 +193,7 @@ public class VillageMenuGUI {
                 lore.add("§c  No workplace assigned");
             }
             lore.add("");
-            String professionName = info.profession != null ? 
-                info.profession.getKey().getKey() : "NONE";
+            String professionName = getProfessionKey(info.profession);
             lore.add("§7Profession: §b" + professionName);
             
             meta.setLore(lore);
@@ -210,7 +209,7 @@ public class VillageMenuGUI {
     private Material getProfessionIcon(Villager.Profession profession) {
         if (profession == null) return Material.VILLAGER_SPAWN_EGG;
         
-        String professionName = profession.getKey().getKey().toUpperCase();
+        String professionName = getProfessionKey(profession).toUpperCase();
         switch (professionName) {
             case "FARMER": return Material.WHEAT;
             case "FISHERMAN": return Material.FISHING_ROD;
@@ -226,6 +225,30 @@ public class VillageMenuGUI {
             case "LEATHERWORKER": return Material.LEATHER;
             case "MASON": return Material.STONE;
             default: return Material.VILLAGER_SPAWN_EGG;
+        }
+    }
+    
+    /**
+     * Safely get profession key string.
+     * Handles null profession and null keys.
+     */
+    private String getProfessionKey(Villager.Profession profession) {
+        if (profession == null) {
+            return "NONE";
+        }
+        try {
+            org.bukkit.NamespacedKey key = profession.getKey();
+            if (key == null) {
+                return "NONE";
+            }
+            return key.getKey();
+        } catch (Exception e) {
+            // Fallback: try to get enum name
+            try {
+                return profession.name().toLowerCase();
+            } catch (Exception e2) {
+                return "NONE";
+            }
         }
     }
     

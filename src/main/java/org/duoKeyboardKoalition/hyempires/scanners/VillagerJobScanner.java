@@ -54,7 +54,7 @@ public class VillagerJobScanner implements Listener {
                     jobsite != null ? jobsite.getBlockX() : "null",
                     jobsite != null ? jobsite.getBlockY() : "null",
                     jobsite != null ? jobsite.getBlockZ() : "null",
-                    profession != null ? profession.getKey().getKey() : "NONE",
+                    getProfessionKey(profession),
                     bed != null ? bed.getBlockX() : "null",
                     bed != null ? bed.getBlockY() : "null",
                     bed != null ? bed.getBlockZ() : "null",
@@ -149,6 +149,30 @@ public class VillagerJobScanner implements Listener {
                name.contains("STAND") || name.contains("FURNACE") || name.contains("CAULDRON") ||
                name.contains("CUTTER") || name.contains("LOOM") || name.contains("GRINDSTONE") ||
                name.contains("BARREL");
+    }
+    
+    /**
+     * Safely get profession key string.
+     * Handles null profession and null keys.
+     */
+    private String getProfessionKey(Villager.Profession profession) {
+        if (profession == null) {
+            return "NONE";
+        }
+        try {
+            NamespacedKey key = profession.getKey();
+            if (key == null) {
+                return "NONE";
+            }
+            return key.getKey();
+        } catch (Exception e) {
+            // Fallback: try to get enum name
+            try {
+                return profession.name().toLowerCase();
+            } catch (Exception e2) {
+                return "NONE";
+            }
+        }
     }
 
     @EventHandler
@@ -261,7 +285,7 @@ public class VillagerJobScanner implements Listener {
             nbt.put("jobsite", null);
         }
         
-        nbt.put("profession", data.profession != null ? data.profession.getKey().getKey() : "NONE");
+        nbt.put("profession", getProfessionKey(data.profession));
         
         if (data.bed != null) {
             nbt.put("bed", NBTFileManager.locationToNBT(data.bed));
@@ -303,14 +327,24 @@ public class VillagerJobScanner implements Listener {
                     NamespacedKey key = NamespacedKey.fromString(professionStr);
                     // Find profession by key
                     for (Villager.Profession prof : Villager.Profession.values()) {
-                        if (prof.getKey().equals(key)) {
-                            data.profession = prof;
-                            break;
+                        try {
+                            NamespacedKey profKey = prof.getKey();
+                            if (profKey != null && profKey.equals(key)) {
+                                data.profession = prof;
+                                break;
+                            }
+                        } catch (Exception e) {
+                            // Skip this profession if getKey() fails
+                            continue;
                         }
                     }
                 } else {
                     // Fallback: try direct enum value
-                    data.profession = Villager.Profession.valueOf(professionStr.toUpperCase());
+                    try {
+                        data.profession = Villager.Profession.valueOf(professionStr.toUpperCase());
+                    } catch (IllegalArgumentException e) {
+                        data.profession = null;
+                    }
                 }
             } catch (Exception e) {
                 data.profession = null;
