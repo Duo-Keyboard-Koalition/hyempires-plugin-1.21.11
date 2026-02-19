@@ -153,6 +153,7 @@ public class VillageAdminListener implements Listener {
             if (villageManager.canAdminister(player, village)) {
                 player.sendMessage("§7=== Administration Options ===");
                 player.sendMessage("§e[Right-click with Paper] §7Get administration token");
+                player.sendMessage("§e[Right-click token anywhere] §7Open administration menu");
                 player.sendMessage("§e[Shift+Right-click] §7Refresh population count");
             }
             

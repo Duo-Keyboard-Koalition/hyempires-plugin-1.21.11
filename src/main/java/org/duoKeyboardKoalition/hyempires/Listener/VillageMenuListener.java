@@ -31,13 +31,12 @@ public class VillageMenuListener implements Listener {
     }
     
     /**
-     * Handle right-clicking bell with administration token to open menu.
+     * Handle right-clicking with administration token to open menu (anywhere).
      */
     @EventHandler
-    public void onBellInteractWithToken(PlayerInteractEvent event) {
-        if (event.getAction() != Action.RIGHT_CLICK_BLOCK) return;
-        
-        if (event.getClickedBlock() == null || event.getClickedBlock().getType() != Material.BELL) {
+    public void onTokenInteract(PlayerInteractEvent event) {
+        // Check for right-click (both air and blocks)
+        if (event.getAction() != Action.RIGHT_CLICK_AIR && event.getAction() != Action.RIGHT_CLICK_BLOCK) {
             return;
         }
         
@@ -49,27 +48,35 @@ public class VillageMenuListener implements Listener {
             return;
         }
         
-        VillageManager.VillageData village = villageManager.getVillageAt(event.getClickedBlock().getLocation());
+        // Cancel the event to prevent other interactions
+        event.setCancelled(true);
         
-        if (village != null) {
-            event.setCancelled(true);
-            
-            // Verify token matches this village
-            String tokenVillageName = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName(plugin, item);
-            if (tokenVillageName == null || !tokenVillageName.equals(village.name)) {
-                player.sendMessage("§cThis token is for a different village!");
-                return;
-            }
-            
-            // Check if player can administer
-            if (!villageManager.canAdminister(player, village)) {
-                player.sendMessage("§cYou need more influence in this village to access the administration menu!");
-                return;
-            }
-            
-            // Open main menu
-            menuGUI.openMainMenu(player, village);
+        // Get village name from token
+        String tokenVillageName = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName(plugin, item);
+        if (tokenVillageName == null) {
+            player.sendMessage("§cInvalid administration token!");
+            return;
         }
+        
+        // Find the village by name
+        VillageManager.VillageData village = villageManager.getAllVillages().stream()
+            .filter(v -> v.active && v.name.equals(tokenVillageName))
+            .findFirst()
+            .orElse(null);
+        
+        if (village == null) {
+            player.sendMessage("§cVillage '" + tokenVillageName + "' no longer exists!");
+            return;
+        }
+        
+        // Check if player can administer
+        if (!villageManager.canAdminister(player, village)) {
+            player.sendMessage("§cYou need more influence in this village to access the administration menu!");
+            return;
+        }
+        
+        // Open main menu
+        menuGUI.openMainMenu(player, village);
     }
     
     /**
@@ -97,13 +104,29 @@ public class VillageMenuListener implements Listener {
         
         // Main menu actions
         if (title.contains("Administration")) {
-            // Find village from bell location (we need to store this somehow)
-            // For now, find village by player's location
-            VillageManager.VillageData village = villageManager.getVillageContaining(player.getLocation());
+            // Get village from token or player location
+            VillageManager.VillageData village = null;
+            
+            // First, try to get village from token
+            org.bukkit.inventory.ItemStack token = player.getInventory().getItemInMainHand();
+            if (token != null && org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.isToken(token)) {
+                String tokenVillageName = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName(plugin, token);
+                if (tokenVillageName != null) {
+                    village = villageManager.getAllVillages().stream()
+                        .filter(v -> v.active && v.name.equals(tokenVillageName))
+                        .findFirst()
+                        .orElse(null);
+                }
+            }
+            
+            // Fallback: find village by player's location
+            if (village == null) {
+                village = villageManager.getVillageContaining(player.getLocation());
+            }
             
             if (village == null) {
                 player.closeInventory();
-                player.sendMessage("§cCould not find village!");
+                player.sendMessage("§cCould not find village! Make sure you're holding a valid administration token.");
                 return;
             }
             
@@ -130,12 +153,31 @@ public class VillageMenuListener implements Listener {
         // Population table actions
         else if (title.contains("Population")) {
             if (itemName.contains("Back")) {
-                // Find village and return to main menu
-                VillageManager.VillageData village = villageManager.getVillageContaining(player.getLocation());
+                // Get village from token or player location
+                VillageManager.VillageData village = null;
+                
+                // First, try to get village from token
+                org.bukkit.inventory.ItemStack token = player.getInventory().getItemInMainHand();
+                if (token != null && org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.isToken(token)) {
+                    String tokenVillageName = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName(plugin, token);
+                    if (tokenVillageName != null) {
+                        village = villageManager.getAllVillages().stream()
+                            .filter(v -> v.active && v.name.equals(tokenVillageName))
+                            .findFirst()
+                            .orElse(null);
+                    }
+                }
+                
+                // Fallback: find village by player's location
+                if (village == null) {
+                    village = villageManager.getVillageContaining(player.getLocation());
+                }
+                
                 if (village != null) {
                     menuGUI.openMainMenu(player, village);
                 } else {
                     player.closeInventory();
+                    player.sendMessage("§cCould not find village! Make sure you're holding a valid administration token.");
                 }
             }
         }

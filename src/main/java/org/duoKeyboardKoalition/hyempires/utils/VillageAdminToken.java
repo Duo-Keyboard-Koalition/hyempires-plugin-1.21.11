@@ -16,7 +16,7 @@ import java.util.Arrays;
  */
 public class VillageAdminToken {
     private static final String TOKEN_NAME = "§6§lVillage Administration Token";
-    private static final String TOKEN_LORE_1 = "§7Right-click a village bell";
+    private static final String TOKEN_LORE_1 = "§7Right-click anywhere";
     private static final String TOKEN_LORE_2 = "§7to open administration menu";
     
     /**
