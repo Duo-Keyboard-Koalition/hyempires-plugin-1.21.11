@@ -4,11 +4,15 @@ import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.java.JavaPlugin;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
 
@@ -139,6 +143,8 @@ public class VillageMenuGUI {
         player.openInventory(inv);
     }
 
+    private static final String VILLAGER_UUID_KEY = "villager_uuid";
+
     private ItemStack createVillagerProfessionItem(Villager villager) {
         Villager.Profession p = villager.getProfession();
         Material icon = getProfessionIcon(p);
@@ -152,12 +158,28 @@ public class VillageMenuGUI {
             List<String> lore = Arrays.asList(
                 "§7§m                    ",
                 "§7Profession: §b" + formatProfessionName(p),
-                "§7Type: §f" + (plugin.getVillagerType(villager) != null ? plugin.getVillagerType(villager).getDisplayName() : "—")
+                "§7Type: §f" + (plugin.getVillagerType(villager) != null ? plugin.getVillagerType(villager).getDisplayName() : "—"),
+                "§eClick to open this villager's trades"
             );
             meta.lore(lore.stream().map(LegacyComponentSerializer.legacySection()::deserialize).toList());
+            PersistentDataContainer pdc = meta.getPersistentDataContainer();
+            pdc.set(new NamespacedKey(plugin, VILLAGER_UUID_KEY), PersistentDataType.STRING, villager.getUniqueId().toString());
             item.setItemMeta(meta);
         }
         return item;
+    }
+
+    /** Get villager UUID from a menu item (used when player clicks a villager in the profession table). */
+    public static java.util.UUID getVillagerUuidFromItem(JavaPlugin plugin, ItemStack item) {
+        if (item == null || !item.hasItemMeta()) return null;
+        PersistentDataContainer pdc = item.getItemMeta().getPersistentDataContainer();
+        NamespacedKey key = new NamespacedKey(plugin, VILLAGER_UUID_KEY);
+        if (!pdc.has(key, PersistentDataType.STRING)) return null;
+        try {
+            return java.util.UUID.fromString(pdc.get(key, PersistentDataType.STRING));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     private static String formatProfessionName(Villager.Profession p) {

@@ -307,6 +307,25 @@ public class VillageMenuListener implements Listener {
                     } else {
                         menuGUI.openMainMenu(player, village);
                     }
+                } else if (title.contains("Villagers:")) {
+                    // Profession table: clicking a villager item opens that villager's trade GUI
+                    java.util.UUID villagerUuid = VillageMenuGUI.getVillagerUuidFromItem(plugin, clicked);
+                    if (villagerUuid != null) {
+                        org.bukkit.World world = village.getAdminLocation() != null ? village.getAdminLocation().getWorld() : null;
+                        if (world != null) {
+                            for (org.bukkit.entity.Entity e : world.getEntities()) {
+                                if (e.getUniqueId().equals(villagerUuid) && e instanceof Villager) {
+                                    Villager v = (Villager) e;
+                                    if (v.isValid()) {
+                                        player.closeInventory();
+                                        player.openMerchant(v, true);
+                                    }
+                                    return;
+                                }
+                            }
+                        }
+                        player.sendMessage("§cVillager no longer available.");
+                    }
                 } else if (title.contains("Villagers - ") && !title.contains("Villagers:")) {
                     // Profession selector: slot 0 = All, slots 1–16 = professions, slot 26 = back
                     int slot = event.getRawSlot();
