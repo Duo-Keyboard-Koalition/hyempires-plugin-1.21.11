@@ -164,33 +164,19 @@ public class VillageAdminListener implements Listener {
                 }
                 return;
             }
-            // Plain paper on village bell: give admin token
-            boolean hasToken = false;
-            for (org.bukkit.inventory.ItemStack invItem : player.getInventory().getContents()) {
-                if (invItem != null && VillageAdminToken.isToken(invItem)) {
-                    String tokenVillage = VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, invItem);
-                    if (villageAtBell.name.equals(tokenVillage)) {
-                        hasToken = true;
-                        break;
-                    }
-                }
-            }
-            if (!hasToken) {
-                org.bukkit.inventory.ItemStack token = VillageAdminToken.createToken((HyEmpiresPlugin) plugin, villageAtBell.name);
-                java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
-                if (overflow.isEmpty()) {
-                    if (item.getAmount() > 1) {
-                        item.setAmount(item.getAmount() - 1);
-                    } else {
-                        player.getInventory().setItemInMainHand(null);
-                    }
-                    player.sendMessage("§a§lVillage Administration Token Received!");
-                    player.sendMessage("§7Right-click the bell with this token to open the administration menu.");
+            // Plain paper on village bell: give admin token (players can have multiple tokens)
+            org.bukkit.inventory.ItemStack token = VillageAdminToken.createToken((HyEmpiresPlugin) plugin, villageAtBell.name);
+            java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
+            if (overflow.isEmpty()) {
+                if (item.getAmount() > 1) {
+                    item.setAmount(item.getAmount() - 1);
                 } else {
-                    player.sendMessage("§cYour inventory is full! Make space and try again.");
+                    player.getInventory().setItemInMainHand(null);
                 }
+                player.sendMessage("§a§lVillage Administration Token Received!");
+                player.sendMessage("§7Right-click the bell with this token to open the administration menu.");
             } else {
-                player.sendMessage("§eYou already have an administration token for this village!");
+                player.sendMessage("§cYour inventory is full! Make space and try again.");
             }
     }
 
@@ -198,7 +184,7 @@ public class VillageAdminListener implements Listener {
     // Ownership is now managed through the influence system
 
     /**
-     * Handles shift right-click to refresh population.
+     * Handles shift right-click on village bell to refresh population (count of villagers using this bell as MEETING_POINT/gossip).
      */
     @EventHandler
     public void onPlayerInteractShift(PlayerInteractEvent event) {
@@ -212,9 +198,9 @@ public class VillageAdminListener implements Listener {
         VillageManager.VillageData village = villageManager.getVillageAt(block.getLocation());
 
         if (village != null) {
-            int count = plugin.getResidentCount(village);
-            villageManager.setPopulationFromResidentCount(village, count);
-            player.sendMessage("§aPopulation updated: " + village.population + " villagers (bed + workplace in village)");
+            int count = plugin.getMeetingPointCount(village);
+            villageManager.setPopulation(village, count);
+            player.sendMessage("§aPopulation updated: " + village.population + " villagers (use this bell as gossip)");
             event.setCancelled(true);
         }
     }

@@ -5,7 +5,6 @@ import org.bukkit.Chunk;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -34,7 +33,7 @@ public class VillageManager {
     //       adminZ: 200
     //       owner: uuid-string
     //       createdDate: timestamp
-    //       population: 5
+    //       population: 5  (villagers using this bell as gossip/MEETING_POINT)
     //       active: true
     //       effectiveRadius: 48
     //       additionalBells:
@@ -51,6 +50,7 @@ public class VillageManager {
         public int effectiveRadius = 48; // Can expand beyond base 48 blocks
         public String owner; // Founder username
         public long createdDate;
+        /** Villagers that use this village's bell(s) as their gossip/MEETING_POINT. */
         public int population;
         public boolean active;
 
@@ -107,23 +107,28 @@ public class VillageManager {
                     owner = null;
                 }
                 createdDate = Long.parseLong(parts[6]);
-                population = Integer.parseInt(parts[7]);
-                active = Boolean.parseBoolean(parts[8]);
-                
-                // Parse effective radius (if present)
-                if (parts.length >= 10) {
+                // 11 parts: createdDate, population, active, effectiveRadius, bells. Legacy 10 parts (no population): createdDate, active, effectiveRadius, bells.
+                int popIdx = 7;
+                int activeIdx = parts.length >= 11 ? 8 : 7;
+                int radiusIdx = parts.length >= 11 ? 9 : 8;
+                int bellsIdx = parts.length >= 11 ? 10 : 9;
+                if (parts.length >= 11) {
+                    try { population = Integer.parseInt(parts[popIdx]); } catch (NumberFormatException e) { population = 0; }
+                } else {
+                    population = 0;
+                }
+                active = Boolean.parseBoolean(parts[activeIdx]);
+                if (parts.length > radiusIdx) {
                     try {
-                        effectiveRadius = Integer.parseInt(parts[9]);
+                        effectiveRadius = Integer.parseInt(parts[radiusIdx]);
                     } catch (NumberFormatException e) {
-                        effectiveRadius = 48; // Default
+                        effectiveRadius = 48;
                     }
                 } else {
-                    effectiveRadius = 48; // Default for old data
+                    effectiveRadius = 48;
                 }
-                
-                // Parse additional bells (if present)
-                if (parts.length >= 11 && !parts[10].equals("none") && !parts[10].isEmpty()) {
-                    String bellsData = parts[10];
+                if (parts.length > bellsIdx && !parts[bellsIdx].equals("none") && !parts[bellsIdx].isEmpty()) {
+                    String bellsData = parts[bellsIdx];
                     String[] bellStrings = bellsData.split(";");
                     for (String bellStr : bellStrings) {
                         String[] coords = bellStr.split(",");
@@ -131,7 +136,7 @@ public class VillageManager {
                             try {
                                 World w = Bukkit.getWorld(world);
                                 if (w != null) {
-                                    Location bellLoc = new Location(w, 
+                                    Location bellLoc = new Location(w,
                                             Integer.parseInt(coords[0]),
                                             Integer.parseInt(coords[1]),
                                             Integer.parseInt(coords[2]));
@@ -180,7 +185,6 @@ public class VillageManager {
                 }
             }
             plugin.getLogger().info("Loaded " + villages.size() + " villages from NBT");
-            refreshAllVillageBedCountsFromScan();
             saveData();
             return;
         }
@@ -203,7 +207,6 @@ public class VillageManager {
                     }
                 }
                 plugin.getLogger().info("Migrated " + villages.size() + " villages from CSV to NBT");
-                refreshAllVillageBedCountsFromScan();
                 saveData(); // Save to NBT format
             } catch (IOException e) {
                 plugin.getLogger().severe("Failed to load villages from CSV: " + e.getMessage());
@@ -310,11 +313,10 @@ public class VillageManager {
         data.adminZ = adminBlockLocation.getBlockZ();
         data.owner = owner.getName();
         data.createdDate = System.currentTimeMillis();
+        data.population = 0;
         data.active = true;
 
         villages.add(data);
-        // New village: scan heads/feet and set bed count = min(heads, feet) / 2
-        setInitialBedCountFromScan(data);
         saveData();
         
         // Initialize founder influence
@@ -621,129 +623,11 @@ public class VillageManager {
     }
 
     /**
-     * Re-scan beds and set population = min(heads, feet) / 2. Use after load or for manual refresh.
+     * Set village population (count of villagers using this village's bell as MEETING_POINT/gossip). Saves after update.
      */
-    public void updatePopulation(VillageData data) {
-        setInitialBedCountFromScan(data);
+    public void setPopulation(VillageData data, int count) {
+        data.population = Math.max(0, count);
         saveData();
-    }
-    
-    /**
-     * Set village bed count from a one-time scan (heads/feet, min/2).
-     * Used when a new village is created or when villages are loaded.
-     */
-    public void setInitialBedCountFromScan(VillageData data) {
-        data.population = countBedsInVillage(data);
-    }
-
-    /**
-     * After loading, set every village's bed count from scan (min(heads,feet)/2).
-     */
-    private void refreshAllVillageBedCountsFromScan() {
-        for (VillageData data : villages) {
-            setInitialBedCountFromScan(data);
-        }
-    }
-
-    /**
-     * Increment bed count by 1 (e.g. player placed a bed). Saves after update.
-     */
-    public void incrementBedCount(VillageData data) {
-        data.population++;
-        saveData();
-    }
-
-    /**
-     * Decrement bed count by 1 (e.g. bed broken). Saves after update. Does not go below 0.
-     */
-    public void decrementBedCount(VillageData data) {
-        data.population = Math.max(0, data.population - 1);
-        saveData();
-    }
-
-    /**
-     * Set population from resident count (villagers with bed AND workplace in this village).
-     * Call this after computing count via plugin.getResidentCount(data).
-     */
-    public void setPopulationFromResidentCount(VillageData data, int residentCount) {
-        data.population = Math.max(0, residentCount);
-        saveData();
-    }
-
-    /**
-     * Legacy: full rescan and set population from bed count. Prefer setPopulationFromResidentCount for true population.
-     */
-    public void updatePopulationFromBeds(VillageData data) {
-        data.population = countBedsInVillage(data);
-        saveData();
-    }
-    
-    /**
-     * Count beds in a village.
-     * Counts HEAD and FOOT parts separately, then beds = min(heads, feet) / 2.
-     */
-    private int countBedsInVillage(VillageData village) {
-        Location bellLoc = village.getAdminLocation();
-        if (bellLoc == null || bellLoc.getWorld() == null) return 0;
-        
-        int headCount = 0;
-        int footCount = 0;
-        int radius = village.effectiveRadius;
-        
-        for (int x = -radius; x <= radius; x++) {
-            for (int z = -radius; z <= radius; z++) {
-                for (int y = -10; y <= 10; y++) {
-                    Location checkLoc = bellLoc.clone().add(x, y, z);
-                    Block block = checkLoc.getBlock();
-                    if (!isBed(block.getType())) continue;
-                    org.bukkit.block.data.BlockData data = block.getBlockData();
-                    if (data instanceof org.bukkit.block.data.type.Bed) {
-                        if (((org.bukkit.block.data.type.Bed) data).getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
-                            headCount++;
-                        } else {
-                            footCount++;
-                        }
-                    }
-                }
-            }
-        }
-        
-        for (Location additionalBell : village.additionalBells) {
-            if (additionalBell.getWorld() == null) continue;
-            for (int x = -48; x <= 48; x++) {
-                for (int z = -48; z <= 48; z++) {
-                    for (int y = -10; y <= 10; y++) {
-                        Location checkLoc = additionalBell.clone().add(x, y, z);
-                        Block block = checkLoc.getBlock();
-                        if (!isBed(block.getType())) continue;
-                        org.bukkit.block.data.BlockData data = block.getBlockData();
-                        if (data instanceof org.bukkit.block.data.type.Bed) {
-                            if (((org.bukkit.block.data.type.Bed) data).getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
-                                headCount++;
-                            } else {
-                                footCount++;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return Math.min(headCount, footCount) / 2;
-    }
-    
-    /**
-     * Check if a material is a bed.
-     */
-    private boolean isBed(Material material) {
-        return material == Material.RED_BED || material == Material.WHITE_BED || 
-               material == Material.BLACK_BED || material == Material.BLUE_BED ||
-               material == Material.BROWN_BED || material == Material.CYAN_BED ||
-               material == Material.GRAY_BED || material == Material.GREEN_BED ||
-               material == Material.LIGHT_BLUE_BED || material == Material.LIGHT_GRAY_BED ||
-               material == Material.LIME_BED || material == Material.MAGENTA_BED ||
-               material == Material.ORANGE_BED || material == Material.PINK_BED ||
-               material == Material.PURPLE_BED || material == Material.YELLOW_BED;
     }
 
     /**
@@ -788,7 +672,7 @@ public class VillageManager {
             info.append("§eFounder: §f").append(data.owner).append("\n");
         }
         
-        info.append("§ePopulation: §f").append(data.population).append(" villagers\n");
+        info.append("§ePopulation: §f").append(data.population).append(" villagers (use this bell as gossip)\n");
         info.append("§ePrimary Bell: §f").append(data.adminX).append(", ").append(data.adminY).append(", ").append(data.adminZ).append("\n");
         info.append("§eEffective Radius: §f").append(data.effectiveRadius).append(" blocks\n");
         if (!data.additionalBells.isEmpty()) {
@@ -880,7 +764,6 @@ public class VillageManager {
                             data.adminZ = block.getZ();
                             data.owner = null;
                             data.createdDate = System.currentTimeMillis();
-                            // Population is now based on bed count, initialize to 0
                             data.population = 0;
                             data.active = true;
                             villages.add(data);

@@ -15,7 +15,7 @@ import java.util.List;
 
 /**
  * Utility for Village Trading Tokens.
- * Obtained by right-clicking a village bell with an emerald.
+ * Token is an emerald item (stays as emerald). Obtained by right-clicking a village bell with an emerald.
  * Right-click with token to open the master trading menu (all villagers' trades for that bell).
  */
 public class TradingToken {
@@ -24,7 +24,7 @@ public class TradingToken {
     private static final String TOKEN_LORE_2 = "§7master trading menu";
 
     public static ItemStack createToken(HyEmpiresPlugin plugin, String villageName) {
-        ItemStack token = new ItemStack(Material.PAPER);
+        ItemStack token = new ItemStack(Material.EMERALD);
         ItemMeta meta = token.getItemMeta();
         if (meta != null) {
             meta.displayName(LegacyComponentSerializer.legacySection().deserialize(TOKEN_NAME));
@@ -44,7 +44,7 @@ public class TradingToken {
     }
 
     public static boolean isToken(ItemStack item) {
-        if (item == null || item.getType() != Material.PAPER) return false;
+        if (item == null || item.getType() != Material.EMERALD) return false;
         ItemMeta meta = item.getItemMeta();
         if (meta == null) return false;
         Component displayName = meta.displayName();

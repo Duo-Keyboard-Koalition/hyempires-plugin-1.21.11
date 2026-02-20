@@ -15,7 +15,6 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.Merchant;
 import org.bukkit.inventory.MerchantRecipe;
 import org.bukkit.entity.Villager;
-import org.duoKeyboardKoalition.hyempires.FeudalVillagerType;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.duoKeyboardKoalition.hyempires.gui.VillageMenuGUI;
 import org.duoKeyboardKoalition.hyempires.managers.InfluenceManager;
@@ -192,8 +191,8 @@ public class VillageMenuListener implements Listener {
         Component titleComponent = event.getView().title();
         String title = LegacyComponentSerializer.legacySection().serialize(titleComponent);
         
-        // Check if it's a village menu (main, population, villagers by profession)
-        if (!title.contains("Administration") && !title.contains("Population") && !title.contains("Villagers")) {
+        // Check if it's a village menu (main, villagers by profession)
+        if (!title.contains("Administration") && !title.contains("Villagers")) {
             return;
         }
         
@@ -233,9 +232,7 @@ public class VillageMenuListener implements Listener {
                 return;
             }
             
-            if (itemName.contains("Population")) {
-                menuGUI.openPopulationTypeSelector(player, village);
-            } else if (itemName.contains("Villagers by Profession") || itemName.contains("Profession")) {
+            if (itemName.contains("Villagers by Profession") || itemName.contains("Profession")) {
                 menuGUI.openVillagersByProfessionSelector(player, village);
             } else if (itemName.contains("Rename") || itemName.contains("Name")) {
                 // Check if player is the current leader
@@ -299,47 +296,9 @@ public class VillageMenuListener implements Listener {
                 menuGUI.openMainMenu(player, village);
             }
         }
-        // Population type selector: "§a§lPopulation - VillageName" (choose All/Scout/Laborer/Peasant/Vassal)
-        else if (title.contains("Population - ") && !title.contains("Population:")) {
-            VillageManager.VillageData village = getVillageFromPopulationTitle(title);
-            if (village == null) {
-                village = getVillageFromTokenOrLocation(player);
-            }
-            if (village != null) {
-                if (itemName.contains("Back")) {
-                    menuGUI.openMainMenu(player, village);
-                } else if (itemName.contains("All Types")) {
-                    menuGUI.openPopulationTable(player, village, null);
-                } else if (itemName.contains("Scout")) {
-                    menuGUI.openPopulationTable(player, village, FeudalVillagerType.SCOUT);
-                } else if (itemName.contains("Laborer")) {
-                    menuGUI.openPopulationTable(player, village, FeudalVillagerType.LABORER);
-                } else if (itemName.contains("Peasant")) {
-                    menuGUI.openPopulationTable(player, village, FeudalVillagerType.PEASANT);
-                } else if (itemName.contains("Vassal")) {
-                    menuGUI.openPopulationTable(player, village, FeudalVillagerType.VASSAL);
-                }
-            } else {
-                player.closeInventory();
-                player.sendMessage("§cCould not find village!");
-            }
-        }
-        // Population table: "§a§lPopulation: Type - VillageName" (list of villagers, Back -> type selector)
-        else if (title.contains("Population:")) {
-            if (itemName.contains("Back")) {
-                VillageManager.VillageData village = getVillageFromPopulationTitle(title);
-                if (village == null) village = getVillageFromTokenOrLocation(player);
-                if (village != null) {
-                    menuGUI.openPopulationTypeSelector(player, village);
-                } else {
-                    player.closeInventory();
-                    player.sendMessage("§cCould not find village!");
-                }
-            }
-        }
         // Villagers by profession: selector (Villagers - VillageName) or table (Villagers: Profession - VillageName)
         else if (title.contains("Villagers")) {
-            VillageManager.VillageData village = getVillageFromPopulationTitle(title);
+            VillageManager.VillageData village = getVillageFromMenuTitle(title);
             if (village == null) village = getVillageFromTokenOrLocation(player);
             if (village != null) {
                 if (itemName.contains("Back")) {
@@ -475,8 +434,8 @@ public class VillageMenuListener implements Listener {
         return false;
     }
     
-    /** Parse village name from population menu title (e.g. "§a§lPopulation - MyVillage" or "§a§lPopulation: Vassals - MyVillage"). */
-    private VillageManager.VillageData getVillageFromPopulationTitle(String title) {
+    /** Parse village name from menu title (e.g. "§6§lVillagers - MyVillage" or "§6§lVillagers: Farmer - MyVillage"). */
+    private VillageManager.VillageData getVillageFromMenuTitle(String title) {
         int i = title.lastIndexOf(" - ");
         if (i < 0) return null;
         String name = title.substring(i + 3).replaceAll("§.", "").trim();
@@ -563,8 +522,10 @@ public class VillageMenuListener implements Listener {
             // Use default name
             VillageManager.VillageData village = villageManager.createVillage(bellLocation, player, null);
             if (village != null) {
+                int pop = plugin.getMeetingPointCount(village);
+                villageManager.setPopulation(village, pop);
                 player.sendMessage("§aVillage '" + village.name + "' has been established!");
-                player.sendMessage("§ePopulation: " + village.population + " villagers");
+                player.sendMessage("§ePopulation: " + village.population + " villagers (use this bell as gossip)");
             }
             return;
         }
@@ -590,8 +551,10 @@ public class VillageMenuListener implements Listener {
         // Create village with founder's chosen name
         VillageManager.VillageData village = villageManager.createVillage(bellLocation, player, trimmedName);
         if (village != null) {
+            int pop = plugin.getMeetingPointCount(village);
+            villageManager.setPopulation(village, pop);
             player.sendMessage("§aVillage '" + village.name + "' has been established!");
-            player.sendMessage("§ePopulation: " + village.population + " villagers");
+            player.sendMessage("§ePopulation: " + village.population + " villagers (use this bell as gossip)");
             player.sendMessage("§7As founder, you have set the initial name. Villagers may vote to change it later!");
         }
     }
@@ -616,11 +579,11 @@ public class VillageMenuListener implements Listener {
         }
 
         VillageManager.VillageData merged = villageManager.mergeVillages(info.primary, info.other, trimmedName, player);
-        if (merged != null) {
-            player.sendMessage("§ePopulation: " + merged.population + " villagers");
-        } else {
+        if (merged == null) {
             player.sendMessage("§cMerge failed. Try again with a different name (or 'cancel'):");
             pendingMerges.put(player, info);
+        } else {
+            player.sendMessage("§ePopulation: " + merged.population + " villagers (use this bell as gossip)");
         }
     }
 }

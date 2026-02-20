@@ -17,7 +17,6 @@ import org.duoKeyboardKoalition.hyempires.scanners.VillagerJobScanner;
 
 /**
  * Handles bed placement and destruction within villages.
- * Tracks beds and updates village population based on bed count.
  */
 public class VillageBedListener implements Listener {
     private final HyEmpiresPlugin plugin;
@@ -50,22 +49,18 @@ public class VillageBedListener implements Listener {
     }
     
     /**
-     * Handle bed placement: if within village (natural radius from bell), update population only. No pathfinding or chunk claiming.
+     * Handle bed placement: if within village (natural radius from bell). No pathfinding or chunk claiming.
      */
     @EventHandler
     public void onBedPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
         if (!isBed(block.getType())) return;
-
-        Location bedLocation = block.getLocation();
-        VillageManager.VillageData village = villageManager.getVillageContaining(bedLocation);
-
+        // Optional: could notify player that bed is in village
+        VillageManager.VillageData village = villageManager.getVillageContaining(block.getLocation());
         if (village != null) {
-            int count = plugin.getResidentCount(village);
-            villageManager.setPopulationFromResidentCount(village, count);
             Player player = event.getPlayer();
             if (player != null) {
-                player.sendMessage("§aBed placed! Village population: §e" + village.population + " (villagers with bed + workplace in village)");
+                player.sendMessage("§aBed placed in §6" + village.name + "§a.");
             }
         }
     }
@@ -109,10 +104,6 @@ public class VillageBedListener implements Listener {
                 }
             }
             
-            if (isBedPartHead(block)) {
-                int count = plugin.getResidentCount(village);
-                villageManager.setPopulationFromResidentCount(village, count);
-            }
         }
     }
 
@@ -125,8 +116,7 @@ public class VillageBedListener implements Listener {
             if (!isBed(block.getType())) continue;
             VillageManager.VillageData village = villageManager.getVillageContaining(block.getLocation());
             if (village != null && isBedPartHead(block)) {
-                int count = plugin.getResidentCount(village);
-                villageManager.setPopulationFromResidentCount(village, count);
+                // Bed destroyed in village - no population to update
             }
         }
     }
@@ -140,8 +130,7 @@ public class VillageBedListener implements Listener {
             if (!isBed(block.getType())) continue;
             VillageManager.VillageData village = villageManager.getVillageContaining(block.getLocation());
             if (village != null && isBedPartHead(block)) {
-                int count = plugin.getResidentCount(village);
-                villageManager.setPopulationFromResidentCount(village, count);
+                // Bed destroyed in village
             }
         }
     }
@@ -192,107 +181,6 @@ public class VillageBedListener implements Listener {
             }
         }
         return "A villager";
-    }
-    
-    /**
-     * Count beds in a village.
-     * Counts HEAD and FOOT parts separately, then beds = min(heads, feet) / 2.
-     */
-    private int countBedsInVillage(VillageManager.VillageData village) {
-        Location bellLoc = village.getAdminLocation();
-        if (bellLoc == null || bellLoc.getWorld() == null) return 0;
-        
-        int[] headCount = new int[1];
-        int[] footCount = new int[1];
-        int radius = village.effectiveRadius;
-        
-        int chunkRadius = (radius / 16) + 1;
-        org.bukkit.Chunk centerChunk = bellLoc.getChunk();
-        
-        for (int cx = -chunkRadius; cx <= chunkRadius; cx++) {
-            for (int cz = -chunkRadius; cz <= chunkRadius; cz++) {
-                org.bukkit.Chunk chunk = bellLoc.getWorld().getChunkAt(
-                    centerChunk.getX() + cx, centerChunk.getZ() + cz);
-                
-                if (!chunk.isLoaded()) continue;
-                
-                for (int x = 0; x < 16; x++) {
-                    for (int z = 0; z < 16; z++) {
-                        int worldX = chunk.getX() * 16 + x;
-                        int worldZ = chunk.getZ() * 16 + z;
-                        double distSq = Math.pow(worldX - bellLoc.getX(), 2) + 
-                                       Math.pow(worldZ - bellLoc.getZ(), 2);
-                        if (distSq > radius * radius) continue;
-                        
-                        int minY = Math.max(bellLoc.getWorld().getMinHeight(), bellLoc.getBlockY() - 10);
-                        int maxY = Math.min(bellLoc.getWorld().getMaxHeight(), bellLoc.getBlockY() + 10);
-                        
-                        for (int y = minY; y <= maxY; y++) {
-                            Block block = chunk.getBlock(x, y, z);
-                            countBedPart(block, headCount, footCount);
-                        }
-                    }
-                }
-            }
-        }
-        
-        for (Location additionalBell : village.additionalBells) {
-            if (additionalBell.getWorld() == null) continue;
-            if (!additionalBell.getWorld().equals(bellLoc.getWorld())) continue;
-            
-            int addChunkRadius = 3;
-            org.bukkit.Chunk addCenterChunk = additionalBell.getChunk();
-            
-            for (int cx = -addChunkRadius; cx <= addChunkRadius; cx++) {
-                for (int cz = -addChunkRadius; cz <= addChunkRadius; cz++) {
-                    org.bukkit.Chunk chunk = additionalBell.getWorld().getChunkAt(
-                        addCenterChunk.getX() + cx, addCenterChunk.getZ() + cz);
-                    if (!chunk.isLoaded()) continue;
-                    
-                    for (int x = 0; x < 16; x++) {
-                        for (int z = 0; z < 16; z++) {
-                            int worldX = chunk.getX() * 16 + x;
-                            int worldZ = chunk.getZ() * 16 + z;
-                            double distSq = Math.pow(worldX - additionalBell.getX(), 2) + 
-                                           Math.pow(worldZ - additionalBell.getZ(), 2);
-                            if (distSq > 48 * 48) continue;
-                            
-                            int minY = Math.max(additionalBell.getWorld().getMinHeight(), additionalBell.getBlockY() - 10);
-                            int maxY = Math.min(additionalBell.getWorld().getMaxHeight(), additionalBell.getBlockY() + 10);
-                            for (int y = minY; y <= maxY; y++) {
-                                Block block = chunk.getBlock(x, y, z);
-                                countBedPart(block, headCount, footCount);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        return Math.min(headCount[0], footCount[0]) / 2;
-    }
-    
-    /** Increment head or foot count for a bed block. */
-    private void countBedPart(Block block, int[] headCount, int[] footCount) {
-        if (!isBed(block.getType())) return;
-        org.bukkit.block.data.BlockData data = block.getBlockData();
-        if (data instanceof org.bukkit.block.data.type.Bed) {
-            if (((org.bukkit.block.data.type.Bed) data).getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
-                headCount[0]++;
-            } else {
-                footCount[0]++;
-            }
-        }
-    }
-    
-    /**
-     * Update village population based on bed count.
-     */
-    public void updateVillagePopulationFromBeds(VillageManager.VillageData village) {
-        int bedCount = countBedsInVillage(village);
-        village.population = bedCount;
-        // Update population through VillageManager
-        villageManager.updatePopulationFromBeds(village);
     }
     
     /**

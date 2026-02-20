@@ -113,8 +113,9 @@ public final class HyEmpiresPlugin extends JavaPlugin {
             villagerScanner.scanAllVillagers();
             campsiteManager.scanLoadedChunks();
             villageManager.scanLoadedChunks();
+            // Refresh village population from entity RAM (MEETING_POINT at each village's bell)
             for (VillageManager.VillageData v : villageManager.getAllVillages()) {
-                villageManager.setPopulationFromResidentCount(v, getResidentCount(v));
+                if (v.active) villageManager.setPopulation(v, getMeetingPointCount(v));
             }
         }, 20L * 5); // 5 second delay
 
@@ -202,7 +203,7 @@ public final class HyEmpiresPlugin extends JavaPlugin {
         return FeudalVillagerType.from(bed != null, workstation != null);
     }
 
-    /** Get villager bed from base game (MemoryKey.HOME) only. */
+    /** Read villager bed from live entity brain in RAM (MemoryKey.HOME). Same data the game AI uses. */
     private static Location getVillagerBedFromGame(Villager villager) {
         try {
             return villager.getMemory(MemoryKey.HOME);
@@ -211,10 +212,19 @@ public final class HyEmpiresPlugin extends JavaPlugin {
         }
     }
 
-    /** Get villager workstation from base game (MemoryKey.JOB_SITE) only. */
+    /** Read villager workstation from live entity brain in RAM (MemoryKey.JOB_SITE). Same data the game AI uses. */
     private static Location getVillagerWorkstationFromGame(Villager villager) {
         try {
             return villager.getMemory(MemoryKey.JOB_SITE);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** Read villager meeting point (gossip bell) from live entity brain in RAM (MemoryKey.MEETING_POINT). Same data the game AI uses. */
+    private static Location getVillagerMeetingPointFromGame(Villager villager) {
+        try {
+            return villager.getMemory(MemoryKey.MEETING_POINT);
         } catch (Throwable t) {
             return null;
         }
@@ -450,12 +460,31 @@ public final class HyEmpiresPlugin extends JavaPlugin {
         return getVillagersInVillageByType(village, type).size();
     }
 
+    /**
+     * Count of villagers that use this village's bell(s) as their gossip/MEETING_POINT (entity brain, RAM).
+     * This is the village population.
+     */
+    public int getMeetingPointCount(VillageManager.VillageData village) {
+        if (village == null) return 0;
+        World world = village.getAdminLocation() != null ? village.getAdminLocation().getWorld() : null;
+        if (world == null) return 0;
+        int count = 0;
+        for (Villager entity : world.getEntitiesByClass(Villager.class)) {
+            if (!entity.isValid()) continue;
+            Location meeting = getVillagerMeetingPointFromGame(entity);
+            if (meeting == null || meeting.getWorld() == null) continue;
+            VillageManager.VillageData atBell = villageManager.getVillageAt(meeting);
+            if (atBell != null && village.name.equals(atBell.name)) count++;
+        }
+        return count;
+    }
+
     /** All villagers linked to this village (HOME or JOB_SITE in village). Base game only. For GUI profession filter. */
     public List<Villager> getVillagersInVillage(VillageManager.VillageData village) {
         return new ArrayList<>(getVillagersLinkedToVillage(village));
     }
 
-    /** Villagers that have at least one of HOME or JOB_SITE (from base game) in this village. */
+    /** Villagers linked to this village. Reads live entity brain (RAM): HOME, JOB_SITE, MEETING_POINT. */
     private java.util.Collection<Villager> getVillagersLinkedToVillage(VillageManager.VillageData village) {
         List<Villager> list = new ArrayList<>();
         if (village == null) return list;
@@ -465,9 +494,14 @@ public final class HyEmpiresPlugin extends JavaPlugin {
             if (!entity.isValid()) continue;
             Location bed = getVillagerBedFromGame(entity);
             Location job = getVillagerWorkstationFromGame(entity);
+            Location meeting = getVillagerMeetingPointFromGame(entity);
             VillageManager.VillageData bedV = bed != null && bed.getWorld() != null ? villageManager.getVillageContaining(bed) : null;
             VillageManager.VillageData workV = job != null && job.getWorld() != null ? villageManager.getVillageContaining(job) : null;
-            boolean inVillage = (bedV != null && village.name.equals(bedV.name)) || (workV != null && village.name.equals(workV.name));
+            // Meeting point = bell; getVillageAt(meeting) returns village that has a bell at that block
+            VillageManager.VillageData meetingV = meeting != null && meeting.getWorld() != null ? villageManager.getVillageAt(meeting) : null;
+            boolean inVillage = (bedV != null && village.name.equals(bedV.name))
+                || (workV != null && village.name.equals(workV.name))
+                || (meetingV != null && village.name.equals(meetingV.name));
             if (inVillage) list.add(entity);
         }
         return list;
@@ -475,7 +509,7 @@ public final class HyEmpiresPlugin extends JavaPlugin {
 
     /**
      * Sync bed/workstation data from entity brain for villagers linked to this village (by HOME/JOB_SITE).
-     * Call when a player opens the population GUI so any scanner cache is up to date.
+     * Call when a player opens the village villager list so any scanner cache is up to date.
      */
     public void refreshVillageVillagerData(VillageManager.VillageData village) {
         VillagerJobScanner scanner = getVillagerScanner();

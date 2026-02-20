@@ -154,9 +154,9 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
             player.sendMessage("§cYou cannot administer this village.");
             return true;
         }
-        int count = plugin.getResidentCount(village);
-        villageManager.setPopulationFromResidentCount(village, count);
-        player.sendMessage("§aPopulation updated: " + village.population + " villagers (bed + workplace in village)");
+        int count = plugin.getMeetingPointCount(village);
+        villageManager.setPopulation(village, count);
+        player.sendMessage("§aPopulation updated: " + village.population + " villagers (use this bell as gossip)");
         return true;
     }
 
@@ -353,7 +353,7 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage("§f/hyempires help §7- Show this help");
         sender.sendMessage("§f/hyempires village list §7- List all villages");
         sender.sendMessage("§f/hyempires village info [name] §7- Village info (stand in village or give name)");
-        sender.sendMessage("§f/hyempires village refresh [name] §7- Refresh population");
+        sender.sendMessage("§f/hyempires village refresh [name] §7- Refresh population (villagers using bell as gossip)");
         sender.sendMessage("§f/hyempires village influence [name] §7- Show influence ranking");
         sender.sendMessage("§f/hyempires campsite list §7- List all campsites");
         sender.sendMessage("§f/hyempires campsite info [name] §7- Campsite info");
@@ -396,7 +396,7 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
                 return completions;
             }
         }
-        if (args.length == 3 && ("info".equalsIgnoreCase(args[1]) || "refresh".equalsIgnoreCase(args[1]))) {
+        if (args.length == 3 && ("info".equalsIgnoreCase(args[1]) || "refresh".equalsIgnoreCase(args[1]) || "influence".equalsIgnoreCase(args[1]))) {
             if ("village".equalsIgnoreCase(args[0])) {
                 String partial = args[2].toLowerCase();
                 villageManager.getAllVillages().stream()

@@ -234,7 +234,7 @@ public class VillageNamingSystem {
             suggestions.add("The " + professionName + "s' Rest");
         }
         
-        // Generate names based on population
+        // Generate names based on population (villagers using this bell as gossip)
         if (village.population >= 10) {
             suggestions.add("Grand Settlement");
             suggestions.add("Great Village");

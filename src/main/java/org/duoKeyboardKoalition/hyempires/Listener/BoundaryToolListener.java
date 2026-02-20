@@ -144,7 +144,7 @@ public class BoundaryToolListener implements Listener {
                     int maxChunks = chunkTerritoryManager.getMaxChunks(villagePower);
                     player.sendMessage("§cNot enough power to claim this chunk!");
                     player.sendMessage("§eCurrent: " + currentChunks + "/" + maxChunks + " chunks");
-                    player.sendMessage("§7More villagers (Vassals) = more power. Territory also auto-expands from beds and workstations.");
+                    player.sendMessage("§7More villagers (using this bell as gossip) = more power. Territory also auto-expands from beds and workstations.");
                 }
             }
             event.setCancelled(true);

@@ -199,9 +199,8 @@ public class ChunkTerritoryManager {
     }
     
     /**
-     * Village power (land influence) is directly from villagers living here.
-     * More villagers = more land influence = more chunks the village can claim.
-     * totalInfluence is kept for API compatibility but land power is population-only.
+     * Village power (land influence) from population = villagers using this village's bell as MEETING_POINT/gossip.
+     * More villagers = more chunks the village can claim.
      */
     public int calculateVillagePower(int population, double totalInfluence) {
         return Math.max(0, population);
