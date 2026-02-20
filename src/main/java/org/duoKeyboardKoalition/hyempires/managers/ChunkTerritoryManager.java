@@ -16,15 +16,32 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ChunkTerritoryManager {
     private final JavaPlugin plugin;
     private final NBTFileManager nbtManager;
-    
-    // Map: VillageName -> Set of claimed chunks
+
+    private TrailInfluenceManager trailInfluenceManager;
+    private RoadNetworkManager roadNetworkManager;
+    /** Used for natural boundaries: getVillageFor* delegates to radius-from-bell. */
+    private VillageManager villageManager;
+
+    // Map: VillageName -> Set of claimed chunks (kept for boundary tool / optional display only; not used for containment)
     private final Map<String, Set<ChunkKey>> villageChunks = new ConcurrentHashMap<>();
-    
+
     // Map: ChunkKey -> VillageName (for quick lookup)
     private final Map<ChunkKey, String> chunkToVillage = new ConcurrentHashMap<>();
-    
-    // Power requirements: chunks per power point
-    private static final int CHUNKS_PER_POWER = 1; // 1 chunk per power point
+
+    public void setTrailInfluenceManager(TrailInfluenceManager trailInfluenceManager) {
+        this.trailInfluenceManager = trailInfluenceManager;
+    }
+
+    public void setRoadNetworkManager(RoadNetworkManager roadNetworkManager) {
+        this.roadNetworkManager = roadNetworkManager;
+    }
+
+    public void setVillageManager(VillageManager villageManager) {
+        this.villageManager = villageManager;
+    }
+
+    // Land influence: power = villagers living here. More villagers = more chunks.
+    private static final int CHUNKS_PER_POWER = 2; // 2 chunks per villager (Vassal)
     private static final int BASE_CHUNKS = 1; // Starting village gets 1 chunk free
     
     // NBT file structure:
@@ -141,25 +158,53 @@ public class ChunkTerritoryManager {
         }
     }
     
+    /** Initial village claim: 5x5 chunks (radius 2) centered on the bell chunk. */
+    private static final int BELL_CLAIM_RADIUS = 2;
+    /** Max path length (chunks) when finding path to bell. */
+    private static final int MAX_PATH_CHUNKS = 500;
+
     /**
-     * Initialize village with base chunk (the chunk containing the bell).
+     * Claim 5x5 chunks (radius 2) centered on a bell. Used for initial village and for each additional bell.
+     * Does not overwrite chunks claimed by another village.
+     */
+    public int claimAreaAroundBell(String villageName, Location bellLocation) {
+        if (bellLocation == null || bellLocation.getWorld() == null) return 0;
+        Chunk center = bellLocation.getChunk();
+        String worldName = center.getWorld().getName();
+        int cx = center.getX();
+        int cz = center.getZ();
+        int claimed = 0;
+        Set<ChunkKey> claimedSet = villageChunks.computeIfAbsent(villageName, k -> ConcurrentHashMap.newKeySet());
+        for (int dx = -BELL_CLAIM_RADIUS; dx <= BELL_CLAIM_RADIUS; dx++) {
+            for (int dz = -BELL_CLAIM_RADIUS; dz <= BELL_CLAIM_RADIUS; dz++) {
+                ChunkKey key = new ChunkKey(worldName, cx + dx, cz + dz);
+                String existing = chunkToVillage.get(key);
+                if (existing != null && !existing.equals(villageName)) continue;
+                if (existing != null && existing.equals(villageName)) continue;
+                claimedSet.add(key);
+                chunkToVillage.put(key, villageName);
+                claimed++;
+            }
+        }
+        if (claimed > 0) saveData();
+        return claimed;
+    }
+
+    /**
+     * Initialize village with a 5x5 chunk area centered on the bell.
+     * Every bell claims radius 2 from its chunk (25 chunks total).
      */
     public void initializeVillage(String villageName, Location bellLocation) {
-        Chunk chunk = bellLocation.getChunk();
-        ChunkKey key = new ChunkKey(chunk);
-        
-        villageChunks.computeIfAbsent(villageName, k -> ConcurrentHashMap.newKeySet()).add(key);
-        chunkToVillage.put(key, villageName);
-        saveData();
+        claimAreaAroundBell(villageName, bellLocation);
     }
     
     /**
-     * Calculate village power based on population and total influence.
+     * Village power (land influence) is directly from villagers living here.
+     * More villagers = more land influence = more chunks the village can claim.
+     * totalInfluence is kept for API compatibility but land power is population-only.
      */
     public int calculateVillagePower(int population, double totalInfluence) {
-        // Power = population + (total influence / 10)
-        // Example: 10 villagers + 100 influence = 10 + 10 = 20 power
-        return population + (int)(totalInfluence / 10.0);
+        return Math.max(0, population);
     }
     
     /**
@@ -178,6 +223,135 @@ public class ChunkTerritoryManager {
         return currentChunks < maxChunks;
     }
     
+    /**
+     * Find a path of chunks from a location to the bell, preferring already-claimed chunks and existing influence paths.
+     * Hierarchy: beds and workstations are under the nearest bell; paths from structures to the bell leave a mark in the
+     * influence path so other structures have an easier path by following existing paths.
+     * Cost: 0 = claimed by us, 0.25 = has path/trail influence (existing path), 1.0 = unclaimed.
+     * Chunks claimed by another village are not traversable.
+     *
+     * @return List of chunk keys from start (structure) to bell, or empty if no path.
+     */
+    public List<ChunkKey> findPathToBellPreferClaimed(Location from, Location bellLocation, String villageName) {
+        if (from == null || bellLocation == null || from.getWorld() == null || !from.getWorld().equals(bellLocation.getWorld()))
+            return Collections.emptyList();
+        String worldName = from.getWorld().getName();
+        int startCx = from.getBlockX() >> 4;
+        int startCz = from.getBlockZ() >> 4;
+        int endCx = bellLocation.getBlockX() >> 4;
+        int endCz = bellLocation.getBlockZ() >> 4;
+
+        Set<ChunkKey> claimedByUs = villageChunks.getOrDefault(villageName, Collections.emptySet());
+        java.util.PriorityQueue<ChunkNode> open = new java.util.PriorityQueue<>(Comparator.comparingDouble(n -> n.f));
+        Map<String, ChunkNode> closed = new HashMap<>();
+        double h0 = Math.sqrt((endCx - startCx) * (endCx - startCx) + (endCz - startCz) * (endCz - startCz));
+        open.add(new ChunkNode(startCx, startCz, 0, h0, null));
+
+        while (!open.isEmpty()) {
+            ChunkNode cur = open.poll();
+            String ck = cur.cx + "," + cur.cz;
+            if (closed.containsKey(ck)) continue;
+            closed.put(ck, cur);
+            if (cur.g > MAX_PATH_CHUNKS) break;
+            if (cur.cx == endCx && cur.cz == endCz) {
+                List<ChunkKey> path = new ArrayList<>();
+                ChunkNode n = cur;
+                while (n != null) {
+                    path.add(new ChunkKey(worldName, n.cx, n.cz));
+                    n = n.parent;
+                }
+                Collections.reverse(path);
+                return path;
+            }
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (dx == 0 && dz == 0) continue;
+                    int ncx = cur.cx + dx;
+                    int ncz = cur.cz + dz;
+                    ChunkKey nkey = new ChunkKey(worldName, ncx, ncz);
+                    String existing = chunkToVillage.get(nkey);
+                    if (existing != null && !existing.equals(villageName)) continue; // other village – not traversable
+                    // Prefer: claimed by us (0), then existing path/trail influence (0.25), then unclaimed (1.0)
+                    double stepCost;
+                    if (claimedByUs.contains(nkey)) {
+                        stepCost = 0.0;
+                    } else if (trailInfluenceManager != null && trailInfluenceManager.getTrailInfluence(villageName, nkey) >= TrailInfluenceManager.TRAIL_THRESHOLD) {
+                        stepCost = 0.25; // existing path makes it easier for others to find the bell
+                    } else {
+                        stepCost = 1.0;
+                    }
+                    double ng = cur.g + (dx != 0 && dz != 0 ? 1.414 : 1.0) * stepCost;
+                    String nk = ncx + "," + ncz;
+                    if (closed.containsKey(nk)) continue;
+                    double nh = Math.sqrt((endCx - ncx) * (endCx - ncx) + (endCz - ncz) * (endCz - ncz));
+                    ChunkNode next = new ChunkNode(ncx, ncz, ng, nh, cur);
+                    next.f = next.g + next.h;
+                    open.add(next);
+                }
+            }
+        }
+        return Collections.emptyList();
+    }
+
+    private static class ChunkNode {
+        final int cx, cz;
+        final double g, h;
+        double f;
+        final ChunkNode parent;
+        ChunkNode(int cx, int cz, double g, double h, ChunkNode parent) {
+            this.cx = cx; this.cz = cz; this.g = g; this.h = h; this.parent = parent;
+            this.f = g + h;
+        }
+    }
+
+    /**
+     * Claim all chunks along a path for a village. Skips chunks already claimed by another village.
+     * No power limit – path claiming extends territory to connect structures to the bell.
+     */
+    public int claimChunksAlongPath(String villageName, List<ChunkKey> path) {
+        if (villageName == null || path == null) return 0;
+        int claimed = 0;
+        for (ChunkKey key : path) {
+            String existing = chunkToVillage.get(key);
+            if (existing != null) {
+                if (existing.equals(villageName)) continue; // already ours
+                continue; // other village – skip
+            }
+            villageChunks.computeIfAbsent(villageName, k -> ConcurrentHashMap.newKeySet()).add(key);
+            chunkToVillage.put(key, villageName);
+            claimed++;
+        }
+        if (claimed > 0) saveData();
+        return claimed;
+    }
+
+    /**
+     * Expand territory from beds/workstations (playdough effect).
+     * Claims chunks that contain any of the given locations, up to max chunks for village power.
+     */
+    public int claimChunksFromStructures(String villageName, Collection<Location> structureLocations, int villagePower) {
+        if (structureLocations == null || structureLocations.isEmpty()) return 0;
+        Set<ChunkKey> preferred = new LinkedHashSet<>();
+        for (Location loc : structureLocations) {
+            if (loc != null && loc.getWorld() != null)
+                preferred.add(new ChunkKey(loc.getWorld().getName(), loc.getBlockX() >> 4, loc.getBlockZ() >> 4));
+        }
+        int maxChunks = getMaxChunks(villagePower);
+        int claimed = 0;
+        for (ChunkKey key : preferred) {
+            if (getClaimedChunkCount(villageName) >= maxChunks) break;
+            if (chunkToVillage.containsKey(key)) {
+                if (chunkToVillage.get(key).equals(villageName)) continue;
+                else continue;
+            }
+            villageChunks.computeIfAbsent(villageName, k -> ConcurrentHashMap.newKeySet()).add(key);
+            chunkToVillage.put(key, villageName);
+            claimed++;
+        }
+        if (claimed > 0) saveData();
+        return claimed;
+    }
+
     /**
      * Claim a chunk for a village (if it has enough power).
      */
@@ -223,19 +397,27 @@ public class ChunkTerritoryManager {
     }
     
     /**
-     * Get the village that owns a chunk.
+     * Get the village for a chunk using natural boundaries only (distance from bells).
+     * Delegates to VillageManager.getVillageContaining(chunk center).
      */
     public String getVillageForChunk(Chunk chunk) {
-        ChunkKey key = new ChunkKey(chunk);
-        return chunkToVillage.get(key);
+        if (villageManager != null && chunk != null && chunk.getWorld() != null) {
+            Location center = new Location(chunk.getWorld(), chunk.getX() * 16 + 8, 64, chunk.getZ() * 16 + 8);
+            VillageManager.VillageData v = villageManager.getVillageContaining(center);
+            return v != null ? v.name : null;
+        }
+        return null;
     }
-    
+
     /**
-     * Get the village that owns a chunk at a location.
+     * Get the village for a location using natural boundaries only (distance from bells).
      */
     public String getVillageForLocation(Location location) {
-        Chunk chunk = location.getChunk();
-        return getVillageForChunk(chunk);
+        if (villageManager != null && location != null) {
+            VillageManager.VillageData v = villageManager.getVillageContaining(location);
+            return v != null ? v.name : null;
+        }
+        return null;
     }
     
     /**
@@ -263,7 +445,7 @@ public class ChunkTerritoryManager {
     }
     
     /**
-     * Remove all chunks for a village.
+     * Remove all chunks for a village. Also notifies trail and road managers if set.
      */
     public void removeVillage(String villageName) {
         Set<ChunkKey> chunks = villageChunks.remove(villageName);
@@ -271,6 +453,47 @@ public class ChunkTerritoryManager {
             chunks.forEach(chunkToVillage::remove);
             saveData();
         }
+        if (trailInfluenceManager != null) trailInfluenceManager.removeVillage(villageName);
+        if (roadNetworkManager != null) roadNetworkManager.removeVillage(villageName);
+    }
+
+    /**
+     * Merge two villages into one: combine chunks under newName, remove old names.
+     */
+    public void mergeVillages(String nameA, String nameB, String newName) {
+        if (nameA == null || nameB == null || newName == null) return;
+        Set<ChunkKey> chunksA = villageChunks.remove(nameA);
+        Set<ChunkKey> chunksB = villageChunks.remove(nameB);
+        Set<ChunkKey> merged = ConcurrentHashMap.newKeySet();
+        if (chunksA != null) {
+            merged.addAll(chunksA);
+            chunksA.forEach(key -> chunkToVillage.put(key, newName));
+        }
+        if (chunksB != null) {
+            merged.addAll(chunksB);
+            chunksB.forEach(key -> chunkToVillage.put(key, newName));
+        }
+        if (!merged.isEmpty()) {
+            villageChunks.put(newName, merged);
+            saveData();
+        }
+    }
+
+    /**
+     * Rename a village (update chunk territory data key).
+     */
+    public void renameVillage(String oldName, String newName) {
+        if (oldName == null || newName == null || oldName.equals(newName)) {
+            return;
+        }
+        Set<ChunkKey> chunks = villageChunks.remove(oldName);
+        if (chunks != null) {
+            villageChunks.put(newName, chunks);
+            chunks.forEach(key -> chunkToVillage.put(key, newName));
+            saveData();
+        }
+        if (trailInfluenceManager != null) trailInfluenceManager.renameVillage(oldName, newName);
+        if (roadNetworkManager != null) roadNetworkManager.renameVillage(oldName, newName);
     }
     
     private void saveData() {

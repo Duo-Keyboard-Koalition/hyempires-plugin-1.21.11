@@ -250,6 +250,15 @@ public class InfluenceManager {
     }
     
     /**
+     * Total influence in a village (sum of all players). Used as "cost" to build and maintain roads.
+     */
+    public double getTotalInfluence(String villageName) {
+        Map<UUID, InfluenceData> influences = villageInfluences.get(villageName);
+        if (influences == null) return 0.0;
+        return influences.values().stream().mapToDouble(d -> d.influence).sum();
+    }
+
+    /**
      * Get all players with influence in a village, sorted by influence.
      */
     public List<Map.Entry<UUID, InfluenceData>> getInfluenceRanking(String villageName) {
@@ -377,5 +386,41 @@ public class InfluenceManager {
     public void removeVillage(String villageName) {
         villageInfluences.remove(villageName);
         saveData();
+    }
+    
+    /**
+     * Merge two villages' influence data under newName; remove old names.
+     */
+    public void mergeVillages(String nameA, String nameB, String newName) {
+        if (nameA == null || nameB == null || newName == null) return;
+        Map<UUID, InfluenceData> influencesA = villageInfluences.remove(nameA);
+        Map<UUID, InfluenceData> influencesB = villageInfluences.remove(nameB);
+        Map<UUID, InfluenceData> merged = new HashMap<>();
+        if (influencesA != null) merged.putAll(influencesA);
+        if (influencesB != null) {
+            for (Map.Entry<UUID, InfluenceData> e : influencesB.entrySet()) {
+                merged.merge(e.getKey(), e.getValue(), (a, b) ->
+                    new InfluenceData(a.influence + b.influence, Math.max(a.lastActivity, b.lastActivity), a.isFounder || b.isFounder));
+            }
+        }
+        if (!merged.isEmpty()) {
+            villageInfluences.put(newName, merged);
+            saveData();
+        }
+    }
+
+    /**
+     * Rename a village (update influence data key).
+     */
+    public void renameVillage(String oldName, String newName) {
+        if (oldName == null || newName == null || oldName.equals(newName)) {
+            return;
+        }
+        
+        Map<UUID, InfluenceData> influences = villageInfluences.remove(oldName);
+        if (influences != null) {
+            villageInfluences.put(newName, influences);
+            saveData();
+        }
     }
 }

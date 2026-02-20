@@ -9,9 +9,10 @@ import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
+import org.duoKeyboardKoalition.hyempires.utils.TradingToken;
+import org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken;
 
 /**
  * Handles events related to village administration blocks.
@@ -28,41 +29,12 @@ public class VillageAdminListener implements Listener {
     }
 
     /**
-     * Handles placing of village admin blocks.
-     * For now, we use a bell as the village administration marker.
+     * Placing a bell does NOT create a village.
+     * Villages are only registered when a player right-clicks an existing bell with paper.
      */
     @EventHandler
     public void onBlockPlace(BlockPlaceEvent event) {
-        Block block = event.getBlock();
-        Player player = event.getPlayer();
-
-        // Check if placing a bell (village admin block)
-        if (block.getType() == Material.BELL) {
-            // Create or expand village after a short delay to ensure block is fully placed
-            plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-                VillageManager.VillageData village = villageManager.createVillage(
-                        block.getLocation(), player, null);
-                
-                if (village != null) {
-                    // Check if this was an expansion or new village
-                    boolean isExpansion = village.additionalBells.stream()
-                            .anyMatch(loc -> loc.getBlockX() == block.getX() && 
-                                           loc.getBlockY() == block.getY() && 
-                                           loc.getBlockZ() == block.getZ());
-                    
-                    if (!isExpansion && village.adminX == block.getX() && 
-                        village.adminY == block.getY() && village.adminZ == block.getZ()) {
-                        // New village
-                        player.sendMessage("§aVillage '" + village.name + "' has been established!");
-                        player.sendMessage("§ePopulation: " + village.population + " villagers");
-                    }
-                    // Expansion message is handled in expandVillage()
-                } else {
-                    // Bell already exists at this location
-                    player.sendMessage("§cA bell already exists at this location!");
-                }
-            }, 5L);
-        }
+        // No village creation on bell place
     }
 
     /**
@@ -92,6 +64,7 @@ public class VillageAdminListener implements Listener {
 
     /**
      * Handles right-clicking on village admin blocks.
+     * Bells start blank. Paper = new village. Administrative paper (token) = add bell to token's village, or merge if bell is another village.
      */
     @EventHandler
     public void onPlayerInteractRight(PlayerInteractEvent event) {
@@ -101,67 +74,124 @@ public class VillageAdminListener implements Listener {
         if (block == null || block.getType() != Material.BELL) return;
 
         Player player = event.getPlayer();
-        VillageManager.VillageData village = villageManager.getVillageAt(block.getLocation());
+        org.bukkit.inventory.ItemStack item = player.getInventory().getItemInMainHand();
+        VillageManager.VillageData villageAtBell = villageManager.getVillageAt(block.getLocation());
 
-        if (village != null) {
-            event.setCancelled(true);
-            
-            // Check if player is holding paper - give them admin token
-            org.bukkit.inventory.ItemStack item = player.getInventory().getItemInMainHand();
+        // ---- Blank bell ----
+        if (villageAtBell == null) {
             if (item != null && item.getType() == Material.PAPER) {
-                // Check if they already have a token for this village
-                boolean hasToken = false;
-                for (org.bukkit.inventory.ItemStack invItem : player.getInventory().getContents()) {
-                    if (invItem != null && org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.isToken(invItem)) {
-                        String tokenVillage = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, invItem);
-                        if (village.name.equals(tokenVillage)) {
-                            hasToken = true;
-                            break;
-                        }
+                event.setCancelled(true);
+                // Administrative paper (token) = add this bell to token's village
+                if (VillageAdminToken.isToken(item)) {
+                    String tokenVillageName = VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, item);
+                    if (tokenVillageName == null) {
+                        player.sendMessage("§cInvalid administration token!");
+                        return;
                     }
+                    VillageManager.VillageData tokenVillage = villageManager.getVillageByName(tokenVillageName);
+                    if (tokenVillage == null) {
+                        player.sendMessage("§cVillage '" + tokenVillageName + "' no longer exists!");
+                        return;
+                    }
+                    VillageManager.VillageData updated = villageManager.addBellToVillage(tokenVillage, block.getLocation(), player);
+                    if (updated != null) {
+                        player.sendMessage("§aBell added to §6" + tokenVillage.name + "§a!");
+                    }
+                    return;
                 }
-                
-                if (!hasToken) {
-                    // Give admin token
-                    org.bukkit.inventory.ItemStack token = org.duoKeyboardKoalition.hyempires.utils.VillageAdminToken.createToken((HyEmpiresPlugin) plugin, village.name);
-                    
-                    // Try to add to inventory
-                    java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
-                    if (overflow.isEmpty()) {
-                        // Consume one paper
-                        if (item.getAmount() > 1) {
-                            item.setAmount(item.getAmount() - 1);
-                        } else {
-                            player.getInventory().setItemInMainHand(null);
-                        }
-                        
-                        player.sendMessage("§a§lVillage Administration Token Received!");
-                        player.sendMessage("§7Right-click the bell with this token to open the administration menu.");
-                    } else {
-                        player.sendMessage("§cYour inventory is full! Make space and try again.");
+                // Plain paper = register new village
+                player.sendMessage("§6=== Register Village ===");
+                player.sendMessage("§eType the village name in chat (or 'skip' for default)");
+                VillageMenuListener menuListener = plugin.getVillageMenuListener();
+                if (menuListener != null) {
+                    menuListener.setPendingVillageCreation(player, block.getLocation());
+                }
+            }
+            return;
+        }
+
+        // ---- Bell already has a village ----
+        // Emerald on village bell = give trading token (master trading menu for this bell)
+        if (villageAtBell != null && item != null && item.getType() == Material.EMERALD) {
+            event.setCancelled(true);
+            org.bukkit.inventory.ItemStack token = TradingToken.createToken((HyEmpiresPlugin) plugin, villageAtBell.name);
+            java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
+            if (overflow.isEmpty()) {
+                if (item.getAmount() > 1) item.setAmount(item.getAmount() - 1);
+                else player.getInventory().setItemInMainHand(null);
+                player.sendMessage("§a§lTrading Token received! §7Right-click to open the village trading menu.");
+            } else {
+                player.sendMessage("§cYour inventory is full!");
+            }
+            return;
+        }
+        // Only handle paper/token; empty hand or other item = let bell ring (don't cancel)
+        if (item == null || item.getType() != Material.PAPER) {
+            return;
+        }
+        event.setCancelled(true);
+
+        if (VillageAdminToken.isToken(item)) {
+                String tokenVillageName = VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, item);
+                if (tokenVillageName == null) {
+                    player.sendMessage("§cInvalid administration token!");
+                    return;
+                }
+                VillageManager.VillageData tokenVillage = villageManager.getVillageByName(tokenVillageName);
+                if (tokenVillage == null) {
+                    player.sendMessage("§cVillage '" + tokenVillageName + "' no longer exists!");
+                    return;
+                }
+                if (tokenVillage.name.equals(villageAtBell.name)) {
+                    // Same village: open administration menu
+                    VillageMenuListener menuListenerSame = plugin.getVillageMenuListener();
+                    if (menuListenerSame != null) menuListenerSame.openMainMenu(player, villageAtBell);
+                    return;
+                }
+                // Different village: merge prompt
+                boolean sameOwner = tokenVillage.owner != null && tokenVillage.owner.equals(villageAtBell.owner);
+                if (sameOwner) {
+                    player.sendMessage("§6=== Merge Villages ===");
+                    player.sendMessage("§eMerge §6" + tokenVillage.name + " §eand §6" + villageAtBell.name + "§e?");
+                    player.sendMessage("§7Type the new village name in chat (or 'cancel' to abort).");
+                    VillageMenuListener menuListener = plugin.getVillageMenuListener();
+                    if (menuListener != null) {
+                        menuListener.setPendingMerge(player, tokenVillage, villageAtBell);
                     }
                 } else {
-                    player.sendMessage("§eYou already have an administration token for this village!");
+                    player.sendMessage("§cMerge requires consent of the other village's owner.");
+                    player.sendMessage("§7(Consent flow not yet implemented.)");
                 }
                 return;
             }
-
-            // Show village info (normal right-click)
-            player.sendMessage(villageManager.getVillageInfo(village, player));
-
-            // If can administer, show options
-            if (villageManager.canAdminister(player, village)) {
-                player.sendMessage("§7=== Administration Options ===");
-                player.sendMessage("§e[Right-click with Paper] §7Get administration token");
-                player.sendMessage("§e[Right-click token anywhere] §7Open administration menu");
-                player.sendMessage("§e[Shift+Right-click] §7Refresh population count");
+            // Plain paper on village bell: give admin token
+            boolean hasToken = false;
+            for (org.bukkit.inventory.ItemStack invItem : player.getInventory().getContents()) {
+                if (invItem != null && VillageAdminToken.isToken(invItem)) {
+                    String tokenVillage = VillageAdminToken.getVillageName((HyEmpiresPlugin) plugin, invItem);
+                    if (villageAtBell.name.equals(tokenVillage)) {
+                        hasToken = true;
+                        break;
+                    }
+                }
             }
-            
-            // Update activity for influence system
-            if (plugin.getInfluenceManager() != null) {
-                plugin.getInfluenceManager().updateActivity(village.name, player.getUniqueId());
+            if (!hasToken) {
+                org.bukkit.inventory.ItemStack token = VillageAdminToken.createToken((HyEmpiresPlugin) plugin, villageAtBell.name);
+                java.util.HashMap<Integer, org.bukkit.inventory.ItemStack> overflow = player.getInventory().addItem(token);
+                if (overflow.isEmpty()) {
+                    if (item.getAmount() > 1) {
+                        item.setAmount(item.getAmount() - 1);
+                    } else {
+                        player.getInventory().setItemInMainHand(null);
+                    }
+                    player.sendMessage("§a§lVillage Administration Token Received!");
+                    player.sendMessage("§7Right-click the bell with this token to open the administration menu.");
+                } else {
+                    player.sendMessage("§cYour inventory is full! Make space and try again.");
+                }
+            } else {
+                player.sendMessage("§eYou already have an administration token for this village!");
             }
-        }
     }
 
     // Removed: Abandon village functionality - villages cannot be abandoned
@@ -181,9 +211,10 @@ public class VillageAdminListener implements Listener {
         Player player = event.getPlayer();
         VillageManager.VillageData village = villageManager.getVillageAt(block.getLocation());
 
-        if (village != null && villageManager.canAdminister(player, village)) {
-            villageManager.updatePopulation(village);
-            player.sendMessage("§aPopulation updated: " + village.population + " villagers");
+        if (village != null) {
+            int count = plugin.getResidentCount(village);
+            villageManager.setPopulationFromResidentCount(village, count);
+            player.sendMessage("§aPopulation updated: " + village.population + " villagers (bed + workplace in village)");
             event.setCancelled(true);
         }
     }

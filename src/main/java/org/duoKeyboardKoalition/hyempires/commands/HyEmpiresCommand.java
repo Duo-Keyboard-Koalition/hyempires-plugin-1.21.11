@@ -154,8 +154,9 @@ public class HyEmpiresCommand implements CommandExecutor, TabCompleter {
             player.sendMessage("§cYou cannot administer this village.");
             return true;
         }
-        villageManager.updatePopulation(village);
-        player.sendMessage("§aPopulation updated: " + village.population + " villagers");
+        int count = plugin.getResidentCount(village);
+        villageManager.setPopulationFromResidentCount(village, count);
+        player.sendMessage("§aPopulation updated: " + village.population + " villagers (bed + workplace in village)");
         return true;
     }
 

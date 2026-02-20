@@ -4,10 +4,11 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Q-Learning agent for villager decision-making during rollcall and similar contexts.
+ * Q-Learning agent for villager decision-making.
  * Learns optimal actions through reward-based updates.
  * 
  * Q(s,a) := Q(s,a) + α * (r + γ * max_a' Q(s',a') - Q(s,a))
+ * (Previously used for rollcall feature, currently unused but kept for future use)
  */
 public class VillagerQLearning {
     

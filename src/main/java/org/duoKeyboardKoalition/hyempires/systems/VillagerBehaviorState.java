@@ -8,9 +8,10 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * Finite State Machine for villager behavior during rollcall.
+ * Finite State Machine for villager behavior.
  * Uses pathfinding to reach assigned spots; villagers make way when players step through.
  * Driven by Q-learning for action selection.
+ * (Previously used for rollcall feature, currently unused but kept for future use)
  */
 public class VillagerBehaviorState {
     public enum State {

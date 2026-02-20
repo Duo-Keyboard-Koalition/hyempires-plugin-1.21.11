@@ -180,6 +180,8 @@ public class VillageManager {
                 }
             }
             plugin.getLogger().info("Loaded " + villages.size() + " villages from NBT");
+            refreshAllVillageBedCountsFromScan();
+            saveData();
             return;
         }
         
@@ -201,6 +203,7 @@ public class VillageManager {
                     }
                 }
                 plugin.getLogger().info("Migrated " + villages.size() + " villages from CSV to NBT");
+                refreshAllVillageBedCountsFromScan();
                 saveData(); // Save to NBT format
             } catch (IOException e) {
                 plugin.getLogger().severe("Failed to load villages from CSV: " + e.getMessage());
@@ -307,20 +310,16 @@ public class VillageManager {
         data.adminZ = adminBlockLocation.getBlockZ();
         data.owner = owner.getName();
         data.createdDate = System.currentTimeMillis();
-        data.population = countVillagersInRadius(adminBlockLocation, 48);
         data.active = true;
 
         villages.add(data);
+        // New village: scan heads/feet and set bed count = min(heads, feet) / 2
+        setInitialBedCountFromScan(data);
         saveData();
         
         // Initialize founder influence
         if (influenceManager != null) {
             influenceManager.initializeFounder(data.name, owner.getName(), owner.getUniqueId());
-        }
-        
-        // Initialize chunk territory (claim the chunk containing the bell)
-        if (chunkTerritoryManager != null) {
-            chunkTerritoryManager.initializeVillage(data.name, adminBlockLocation);
         }
 
         notifyNearbyPlayers(adminBlockLocation, "§aNew village established: " + data.name);
@@ -329,76 +328,169 @@ public class VillageManager {
     }
     
     /**
-     * Expands an existing village by adding a new bell location.
-     * Checks if village has enough power to claim the chunk.
+     * Expands an existing village by adding a new bell location. Boundaries are natural (radius from bells only).
      */
     private VillageData expandVillage(VillageData village, Location newBellLocation, Player player) {
-        Chunk newChunk = newBellLocation.getChunk();
-        
-        // Check if village can claim this chunk (power requirement)
-        if (chunkTerritoryManager != null) {
-            // Calculate village power
-            double totalInfluence = 0.0;
-            if (influenceManager != null) {
-                List<Map.Entry<UUID, InfluenceManager.InfluenceData>> ranking = 
-                        influenceManager.getInfluenceRanking(village.name);
-                totalInfluence = ranking.stream()
-                        .mapToDouble(e -> e.getValue().influence)
-                        .sum();
-            }
-            
-            int villagePower = chunkTerritoryManager.calculateVillagePower(village.population, totalInfluence);
-            
-            // Check if chunk is already claimed by this village
-            String chunkOwner = chunkTerritoryManager.getVillageForChunk(newChunk);
-            if (chunkOwner != null && !chunkOwner.equals(village.name)) {
-                player.sendMessage("§cThis chunk is already claimed by another village!");
-                return null;
-            }
-            
-            // Try to claim the chunk
-            if (!chunkTerritoryManager.claimChunk(village.name, newChunk, villagePower)) {
-                int currentChunks = chunkTerritoryManager.getClaimedChunkCount(village.name);
-                int maxChunks = chunkTerritoryManager.getMaxChunks(villagePower);
-                player.sendMessage("§cVillage doesn't have enough power to claim this chunk!");
-                player.sendMessage("§eCurrent: " + currentChunks + " chunks, Power: " + villagePower + ", Max: " + maxChunks + " chunks");
-                player.sendMessage("§7Increase population or influence to gain more power!");
-                return null;
-            }
-        }
-        
-        // Add the new bell location
         village.additionalBells.add(newBellLocation.clone());
-        
-        // Calculate new effective radius (distance from primary bell to new bell + base radius)
+
         Location primaryLoc = village.getAdminLocation();
         if (primaryLoc != null) {
             double distanceToNewBell = primaryLoc.distance(newBellLocation);
-            // Expand radius to include the new bell with some buffer
             village.effectiveRadius = Math.max(village.effectiveRadius, (int)(distanceToNewBell + 48));
         }
-        
-        // Update population to include area around new bell
-        int newBellPopulation = countVillagersInRadius(newBellLocation, 48);
-        village.population = Math.max(village.population, newBellPopulation);
-        
-        // Grant influence to player for expanding village
+
         if (influenceManager != null) {
             influenceManager.addInfluence(village.name, player.getUniqueId(), 10.0, "Village Expansion");
             influenceManager.updateActivity(village.name, player.getUniqueId());
         }
-        
+
         saveData();
-        
+
         notifyNearbyPlayers(newBellLocation, "§6Village '" + village.name + "' has been expanded!");
         player.sendMessage("§6You've expanded " + village.name + " by placing a new bell!");
         player.sendMessage("§eNew effective radius: " + village.effectiveRadius + " blocks");
+
+        return village;
+    }
+
+    /**
+     * Add a blank bell to an existing village (administrative paper on blank bell).
+     * The bell must not already be registered as any village.
+     */
+    public VillageData addBellToVillage(VillageData village, Location newBellLocation, Player player) {
+        if (village == null || newBellLocation == null || player == null) return null;
+        if (getVillageAt(newBellLocation) != null) {
+            player.sendMessage("§cThis bell is already part of a village!");
+            return null;
+        }
+        if (!village.world.equals(newBellLocation.getWorld().getName())) {
+            player.sendMessage("§cBell must be in the same world as the village!");
+            return null;
+        }
+        return expandVillage(village, newBellLocation, player);
+    }
+
+    /**
+     * Merge two villages into one with a new name. Same-owner only (different-owner consent not implemented).
+     *
+     * @param primary  Village from the token the player is holding
+     * @param other    Village at the bell the player clicked
+     * @param newName  Name for the merged village
+     * @param initiator Player initiating the merge
+     * @return The merged village, or null if merge failed
+     */
+    public VillageData mergeVillages(VillageData primary, VillageData other, String newName, Player initiator) {
+        if (primary == null || other == null || primary == other || newName == null || newName.trim().isEmpty()) {
+            return null;
+        }
+        String trimmedName = newName.trim();
+        if (trimmedName.length() > 32) {
+            if (initiator != null) initiator.sendMessage("§cName too long! Max 32 characters.");
+            return null;
+        }
+        for (VillageData v : villages) {
+            if (v.active && v != primary && v != other && v.name.equalsIgnoreCase(trimmedName)) {
+                if (initiator != null) initiator.sendMessage("§cA village with that name already exists!");
+                return null;
+            }
+        }
+
+        VillageData merged = new VillageData();
+        merged.name = trimmedName;
+        merged.world = primary.world;
+        merged.adminX = primary.adminX;
+        merged.adminY = primary.adminY;
+        merged.adminZ = primary.adminZ;
+        merged.owner = primary.owner;
+        merged.createdDate = Math.min(primary.createdDate, other.createdDate);
+        merged.population = primary.population + other.population;
+        merged.active = true;
+        merged.effectiveRadius = Math.max(primary.effectiveRadius, other.effectiveRadius);
+        Location otherPrimary = other.getAdminLocation();
+        if (otherPrimary != null) {
+            merged.additionalBells.add(otherPrimary.clone());
+            double dist = primary.getAdminLocation() != null ? primary.getAdminLocation().distance(otherPrimary) : 0;
+            merged.effectiveRadius = Math.max(merged.effectiveRadius, (int)(dist + 48));
+        }
+        merged.additionalBells.addAll(primary.additionalBells);
+        for (Location bell : other.additionalBells) {
+            if (bell != null && !merged.additionalBells.contains(bell)) merged.additionalBells.add(bell.clone());
+        }
+
         if (chunkTerritoryManager != null) {
-            int chunks = chunkTerritoryManager.getClaimedChunkCount(village.name);
-            player.sendMessage("§eClaimed chunks: " + chunks);
+            chunkTerritoryManager.mergeVillages(primary.name, other.name, trimmedName);
+        }
+        if (influenceManager != null) {
+            influenceManager.mergeVillages(primary.name, other.name, trimmedName);
+        }
+        if (plugin instanceof org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin) {
+            org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin ep = (org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin) plugin;
+            if (ep.getRoadNetworkManager() != null) ep.getRoadNetworkManager().mergeVillages(primary.name, other.name, trimmedName);
+            if (ep.getTrailInfluenceManager() != null) ep.getTrailInfluenceManager().mergeVillages(primary.name, other.name, trimmedName);
+        }
+
+        villages.remove(primary);
+        villages.remove(other);
+        villages.add(merged);
+        saveData();
+
+        if (initiator != null) {
+            initiator.sendMessage("§aVillages merged into §6" + trimmedName + "§a!");
+        }
+        return merged;
+    }
+
+    /**
+     * Renames a village (internal method - called by naming system after voting).
+     * No permission checks - villagers have voted!
+     */
+    public boolean renameVillage(VillageData village, String newName) {
+        if (village == null || newName == null || newName.trim().isEmpty()) {
+            return false;
         }
         
-        return village;
+        // Check if name is too long
+        if (newName.length() > 32) {
+            return false;
+        }
+        
+        // Check if name already exists
+        String trimmedName = newName.trim();
+        for (VillageData v : villages) {
+            if (v.active && !v.equals(village) && v.name.equalsIgnoreCase(trimmedName)) {
+                return false;
+            }
+        }
+        
+        String oldName = village.name;
+        village.name = trimmedName;
+        saveData();
+        
+        // Update influence manager if village name changed
+        if (influenceManager != null && !oldName.equals(trimmedName)) {
+            influenceManager.renameVillage(oldName, trimmedName);
+        }
+        
+        // Update chunk territory manager if village name changed
+        if (chunkTerritoryManager != null && !oldName.equals(trimmedName)) {
+            chunkTerritoryManager.renameVillage(oldName, trimmedName);
+        }
+        
+        return true;
+    }
+    
+    /**
+     * Get influence manager (for naming system).
+     */
+    public InfluenceManager getInfluenceManager() {
+        return influenceManager;
+    }
+    
+    /**
+     * Get chunk territory manager (for naming system).
+     */
+    public ChunkTerritoryManager getChunkTerritoryManager() {
+        return chunkTerritoryManager;
     }
 
     /**
@@ -459,30 +551,30 @@ public class VillageManager {
     }
 
     /**
-     * Gets the village that contains a specific location (within village radius).
-     * Checks both primary bell and additional bells, using effective radius.
+     * Gets the village that contains a specific location.
+     * Uses natural Minecraft-style boundaries: distance from bells only (effectiveRadius from primary bell, 48 from additional bells).
+     * No artificial chunk claims, roads, or trail influence – a location is in a village if it is within range of that village's bell(s).
      */
     public VillageData getVillageContaining(Location location) {
+        if (location == null || location.getWorld() == null) return null;
+        String worldName = location.getWorld().getName();
         for (VillageData data : villages) {
             if (!data.active) continue;
-            if (!data.world.equals(location.getWorld().getName())) continue;
-
+            if (!data.world.equals(worldName)) continue;
             Location adminLoc = data.getAdminLocation();
-            if (adminLoc == null) continue;
+            if (adminLoc != null && location.distance(adminLoc) <= data.effectiveRadius) return data;
+            for (Location bell : data.additionalBells) {
+                if (bell != null && bell.getWorld() != null && bell.getWorld().getName().equals(worldName) && location.distance(bell) <= 48) return data;
+            }
+        }
+        return null;
+    }
 
-            // Check distance to primary bell
-            double distance = location.distance(adminLoc);
-            if (distance <= data.effectiveRadius) {
-                return data;
-            }
-            
-            // Check distance to additional bells
-            for (Location additionalBell : data.additionalBells) {
-                double distToAdditional = location.distance(additionalBell);
-                if (distToAdditional <= 48) { // Each additional bell has 48 block radius
-                    return data;
-                }
-            }
+    /** Get village by exact name. */
+    public VillageData getVillageByName(String name) {
+        if (name == null) return null;
+        for (VillageData data : villages) {
+            if (data.active && name.equals(data.name)) return data;
         }
         return null;
     }
@@ -529,35 +621,129 @@ public class VillageManager {
     }
 
     /**
-     * Updates the population count for a village.
-     * Counts villagers around all bells (primary + additional).
+     * Re-scan beds and set population = min(heads, feet) / 2. Use after load or for manual refresh.
      */
     public void updatePopulation(VillageData data) {
-        Set<org.bukkit.entity.Villager> countedVillagers = new HashSet<>();
-        
-        // Count around primary bell
-        Location primaryLoc = data.getAdminLocation();
-        if (primaryLoc != null && primaryLoc.getWorld() != null) {
-            primaryLoc.getWorld().getNearbyEntities(primaryLoc, data.effectiveRadius, data.effectiveRadius, data.effectiveRadius)
-                    .stream()
-                    .filter(e -> e instanceof org.bukkit.entity.Villager)
-                    .map(e -> (org.bukkit.entity.Villager) e)
-                    .forEach(countedVillagers::add);
+        setInitialBedCountFromScan(data);
+        saveData();
+    }
+    
+    /**
+     * Set village bed count from a one-time scan (heads/feet, min/2).
+     * Used when a new village is created or when villages are loaded.
+     */
+    public void setInitialBedCountFromScan(VillageData data) {
+        data.population = countBedsInVillage(data);
+    }
+
+    /**
+     * After loading, set every village's bed count from scan (min(heads,feet)/2).
+     */
+    private void refreshAllVillageBedCountsFromScan() {
+        for (VillageData data : villages) {
+            setInitialBedCountFromScan(data);
         }
+    }
+
+    /**
+     * Increment bed count by 1 (e.g. player placed a bed). Saves after update.
+     */
+    public void incrementBedCount(VillageData data) {
+        data.population++;
+        saveData();
+    }
+
+    /**
+     * Decrement bed count by 1 (e.g. bed broken). Saves after update. Does not go below 0.
+     */
+    public void decrementBedCount(VillageData data) {
+        data.population = Math.max(0, data.population - 1);
+        saveData();
+    }
+
+    /**
+     * Set population from resident count (villagers with bed AND workplace in this village).
+     * Call this after computing count via plugin.getResidentCount(data).
+     */
+    public void setPopulationFromResidentCount(VillageData data, int residentCount) {
+        data.population = Math.max(0, residentCount);
+        saveData();
+    }
+
+    /**
+     * Legacy: full rescan and set population from bed count. Prefer setPopulationFromResidentCount for true population.
+     */
+    public void updatePopulationFromBeds(VillageData data) {
+        data.population = countBedsInVillage(data);
+        saveData();
+    }
+    
+    /**
+     * Count beds in a village.
+     * Counts HEAD and FOOT parts separately, then beds = min(heads, feet) / 2.
+     */
+    private int countBedsInVillage(VillageData village) {
+        Location bellLoc = village.getAdminLocation();
+        if (bellLoc == null || bellLoc.getWorld() == null) return 0;
         
-        // Count around additional bells (avoid double counting)
-        for (Location bell : data.additionalBells) {
-            if (bell.getWorld() != null) {
-                bell.getWorld().getNearbyEntities(bell, 48, 48, 48)
-                        .stream()
-                        .filter(e -> e instanceof org.bukkit.entity.Villager)
-                        .map(e -> (org.bukkit.entity.Villager) e)
-                        .forEach(countedVillagers::add);
+        int headCount = 0;
+        int footCount = 0;
+        int radius = village.effectiveRadius;
+        
+        for (int x = -radius; x <= radius; x++) {
+            for (int z = -radius; z <= radius; z++) {
+                for (int y = -10; y <= 10; y++) {
+                    Location checkLoc = bellLoc.clone().add(x, y, z);
+                    Block block = checkLoc.getBlock();
+                    if (!isBed(block.getType())) continue;
+                    org.bukkit.block.data.BlockData data = block.getBlockData();
+                    if (data instanceof org.bukkit.block.data.type.Bed) {
+                        if (((org.bukkit.block.data.type.Bed) data).getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
+                            headCount++;
+                        } else {
+                            footCount++;
+                        }
+                    }
+                }
             }
         }
         
-        data.population = countedVillagers.size();
-        saveData();
+        for (Location additionalBell : village.additionalBells) {
+            if (additionalBell.getWorld() == null) continue;
+            for (int x = -48; x <= 48; x++) {
+                for (int z = -48; z <= 48; z++) {
+                    for (int y = -10; y <= 10; y++) {
+                        Location checkLoc = additionalBell.clone().add(x, y, z);
+                        Block block = checkLoc.getBlock();
+                        if (!isBed(block.getType())) continue;
+                        org.bukkit.block.data.BlockData data = block.getBlockData();
+                        if (data instanceof org.bukkit.block.data.type.Bed) {
+                            if (((org.bukkit.block.data.type.Bed) data).getPart() == org.bukkit.block.data.type.Bed.Part.HEAD) {
+                                headCount++;
+                            } else {
+                                footCount++;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        return Math.min(headCount, footCount) / 2;
+    }
+    
+    /**
+     * Check if a material is a bed.
+     */
+    private boolean isBed(Material material) {
+        return material == Material.RED_BED || material == Material.WHITE_BED || 
+               material == Material.BLACK_BED || material == Material.BLUE_BED ||
+               material == Material.BROWN_BED || material == Material.CYAN_BED ||
+               material == Material.GRAY_BED || material == Material.GREEN_BED ||
+               material == Material.LIGHT_BLUE_BED || material == Material.LIGHT_GRAY_BED ||
+               material == Material.LIME_BED || material == Material.MAGENTA_BED ||
+               material == Material.ORANGE_BED || material == Material.PINK_BED ||
+               material == Material.PURPLE_BED || material == Material.YELLOW_BED;
     }
 
     /**
@@ -608,22 +794,7 @@ public class VillageManager {
         if (!data.additionalBells.isEmpty()) {
             info.append("§eAdditional Bells: §f").append(data.additionalBells.size()).append("\n");
         }
-        
-        // Show power and chunk info
-        if (chunkTerritoryManager != null) {
-            double totalInfluence = 0.0;
-            if (influenceManager != null) {
-                List<Map.Entry<UUID, InfluenceManager.InfluenceData>> ranking = influenceManager.getInfluenceRanking(data.name);
-                totalInfluence = ranking.stream().mapToDouble(e -> e.getValue().influence).sum();
-            }
-            int villagePower = chunkTerritoryManager.calculateVillagePower(data.population, totalInfluence);
-            int claimedChunks = chunkTerritoryManager.getClaimedChunkCount(data.name);
-            int maxChunks = chunkTerritoryManager.getMaxChunks(villagePower);
-            
-            info.append("§eVillage Power: §f").append(villagePower).append("\n");
-            info.append("§eClaimed Chunks: §f").append(claimedChunks).append("/").append(maxChunks).append("\n");
-        }
-        
+
         info.append("§eStatus: §f").append(data.active ? "§aActive" : "§cInactive");
         
         // Show influence ranking
@@ -660,6 +831,11 @@ public class VillageManager {
             nbtVillages.add(toNBT(data));
         }
         nbtManager.saveList("villages", nbtVillages);
+    }
+
+    /** Persist villages to disk. Call on plugin disable so bells/villages survive server restart. */
+    public void save() {
+        saveData();
     }
 
     private void notifyNearbyPlayers(Location location, String message) {
@@ -704,7 +880,8 @@ public class VillageManager {
                             data.adminZ = block.getZ();
                             data.owner = null;
                             data.createdDate = System.currentTimeMillis();
-                            data.population = countVillagersInRadius(loc, 48);
+                            // Population is now based on bed count, initialize to 0
+                            data.population = 0;
                             data.active = true;
                             villages.add(data);
                         }

@@ -14,7 +14,9 @@ import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+import org.duoKeyboardKoalition.hyempires.FeudalVillagerType;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
+import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
 import org.duoKeyboardKoalition.hyempires.scanners.VillagerJobScanner;
 
 import java.util.Set;
@@ -188,6 +190,8 @@ public class VillagerAssignmentListener implements Listener {
         String professionName = villager.getProfession() != null ? 
             villager.getProfession().getKey().getKey() : "NONE";
         player.sendMessage("§eProfession: §b" + professionName);
+        FeudalVillagerType type = plugin.getVillagerType(villager);
+        player.sendMessage("§eType: §f" + type.getDisplayName() + " §7(" + type.getDescription() + ")");
         player.sendMessage("");
         
         // Bed location
@@ -230,6 +234,11 @@ public class VillagerAssignmentListener implements Listener {
             return;
         }
         
+        // Check if bed is in a village
+        VillageManager villageManager = plugin.getVillageManager();
+        VillageManager.VillageData village = villageManager != null ? 
+            villageManager.getVillageContaining(bedLocation) : null;
+        
         // Use public API to assign bed
         boolean success = scanner.assignBed(villager, bedLocation);
         
@@ -240,14 +249,32 @@ public class VillagerAssignmentListener implements Listener {
             }
             
             Component customName = villager.customName();
-        String villagerName = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : "Villager";
+            String villagerName = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : "Villager";
             player.sendMessage("§a§lBed Assigned!");
             player.sendMessage("§7Assigned bed at §f" + bedLocation.getBlockX() + ", " + 
                              bedLocation.getBlockY() + ", " + bedLocation.getBlockZ() + 
                              " §7to §e" + villagerName);
+            
+            // If bed is in a village, notify that villager moved in
+            if (village != null) {
+                String message = "§a" + villagerName + " §7moved into §6" + village.name;
+                notifyNearbyPlayers(bedLocation, message);
+            }
         } else {
             player.sendMessage("§cError: Could not assign bed to villager!");
         }
+    }
+    
+    /**
+     * Notify nearby players.
+     */
+    private void notifyNearbyPlayers(org.bukkit.Location location, String message) {
+        if (location.getWorld() == null) return;
+        location.getWorld().getPlayers().forEach(player -> {
+            if (player.getLocation().distance(location) <= 50) {
+                player.sendMessage(message);
+            }
+        });
     }
     
     /**
@@ -273,6 +300,9 @@ public class VillagerAssignmentListener implements Listener {
         if (success) {
             // Note: setWorkstation() is not available in Bukkit API
             // Villager will claim the workstation naturally when they pathfind to it
+
+            VillageManager.VillageData village = plugin.getVillageManager().getVillageContaining(workstationLocation);
+            if (village != null) plugin.refreshVillageTerritory(village);
             
             // Update profession based on workstation type
             Material workstationType = workstationBlock.getType();

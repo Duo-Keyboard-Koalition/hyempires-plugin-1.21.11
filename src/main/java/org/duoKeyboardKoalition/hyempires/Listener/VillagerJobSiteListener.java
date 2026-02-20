@@ -1,14 +1,14 @@
 package org.duoKeyboardKoalition.hyempires.Listener;
 
 import org.bukkit.block.Block;
+import org.bukkit.entity.Player;
 import org.bukkit.entity.Villager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.plugin.java.JavaPlugin;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.bukkit.Material;
-import org.bukkit.entity.Player;
+import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
 
 import java.util.Set;
 
@@ -39,25 +39,24 @@ public class VillagerJobSiteListener implements Listener {
         this.plugin = plugin;
     }
     
+    /**
+     * On workstation place: no search. If within a village's 5x5/claimed territory it is part of that bell's influence.
+     * If outside, player can right-click the block with an admin token to add it to a village (that starts the search).
+     */
     @EventHandler
     public void onWorkstationPlace(BlockPlaceEvent event) {
         Block block = event.getBlock();
-        Material blockType = block.getType();
-        
-        // Check if this is a workstation block
-        if (!WORKSTATION_BLOCKS.contains(blockType)) {
-            return;
+        if (!WORKSTATION_BLOCKS.contains(block.getType())) return;
+
+        VillageManager.VillageData village = plugin.getVillageManager().getVillageContaining(block.getLocation());
+        if (village != null) {
+            return; // Within 5x5 or claimed chunks – already part of bell's influence
         }
-        
-        // Check if the block is in a village's claimed territory
-        String villageName = plugin.getChunkTerritoryManager().getVillageForLocation(block.getLocation());
-        
-        if (villageName == null) {
-            // Not in any village territory - warn player
-            Player player = event.getPlayer();
-            player.sendMessage("§eWarning: This workstation is outside village territory!");
-            player.sendMessage("§7Villagers can only claim job sites within village chunks.");
-            player.sendMessage("§7Use §f/hyempires tool §7to get a boundary tool and claim chunks.");
+
+        Player player = event.getPlayer();
+        if (player != null) {
+            player.sendMessage("§eWorkstation is outside village territory.");
+            player.sendMessage("§7Place it within a village's radius of its bell to be part of that village.");
         }
     }
     

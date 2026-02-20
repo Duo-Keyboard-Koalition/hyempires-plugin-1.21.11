@@ -3,10 +3,8 @@ package org.duoKeyboardKoalition.hyempires.scanners;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.*;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.EntityType;
-
 import org.bukkit.entity.Villager;
+import org.bukkit.entity.memory.MemoryKey;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDeathEvent;
@@ -80,7 +78,6 @@ public class VillagerJobScanner implements Listener {
         return customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : null;
     }
 
-    @SuppressWarnings("unchecked")
     private void loadExistingData() {
         // Try loading from NBT first
         List<Map<String, Object>> nbtData = nbtManager.loadList("villagers");
@@ -112,27 +109,6 @@ public class VillagerJobScanner implements Listener {
         plugin.getServer().getWorlds().forEach(world -> {
             world.getEntitiesByClass(Villager.class).forEach(villager -> {
                 updateVillagerData(villager);
-                
-                // Check if villager's job site is outside village territory
-                if (plugin instanceof HyEmpiresPlugin) {
-                    HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
-                    
-                    // Get job site from stored data
-                    VillagerData data = villagerDataMap.get(villager.getUniqueId());
-                    if (data != null && data.jobsite != null) {
-                        org.bukkit.Location jobSiteLoc = data.jobsite;
-                        String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
-                        if (villageName == null) {
-                            // Job site is outside village territory - break it
-                            org.bukkit.block.Block workstationBlock = jobSiteLoc.getBlock();
-                            if (isWorkstationBlock(workstationBlock.getType())) {
-                                workstationBlock.breakNaturally();
-                                String nameStr = getVillagerNameString(villager);
-                                plugin.getLogger().info("Removed workstation outside village territory for villager " + (nameStr != null ? nameStr : "Unknown"));
-                            }
-                        }
-                    }
-                }
             });
         });
 
@@ -155,7 +131,21 @@ public class VillagerJobScanner implements Listener {
     }
     
     private boolean isWorkstationBlock(org.bukkit.Material material) {
-        String name = material.name();
+        // Use getKey() instead of deprecated name()
+        try {
+            org.bukkit.NamespacedKey key = material.getKey();
+            if (key != null) {
+                String keyStr = key.getKey().toUpperCase();
+                return keyStr.contains("COMPOSTER") || keyStr.contains("TABLE") || keyStr.contains("LECTERN") ||
+                       keyStr.contains("STAND") || keyStr.contains("FURNACE") || keyStr.contains("CAULDRON") ||
+                       keyStr.contains("CUTTER") || keyStr.contains("LOOM") || keyStr.contains("GRINDSTONE") ||
+                       keyStr.contains("BARREL");
+            }
+        } catch (Exception e) {
+            // Fallback to enum name if key not available
+        }
+        // Fallback: use toString() which should work
+        String name = material.toString().toUpperCase();
         return name.contains("COMPOSTER") || name.contains("TABLE") || name.contains("LECTERN") ||
                name.contains("STAND") || name.contains("FURNACE") || name.contains("CAULDRON") ||
                name.contains("CUTTER") || name.contains("LOOM") || name.contains("GRINDSTONE") ||
@@ -177,9 +167,9 @@ public class VillagerJobScanner implements Listener {
             }
             return key.getKey();
         } catch (Exception e) {
-            // Fallback: try to get enum name
+            // Fallback: use toString() instead of deprecated name()
             try {
-                return profession.name().toLowerCase();
+                return profession.toString().toLowerCase().replace("minecraft:", "");
             } catch (Exception e2) {
                 return "NONE";
             }
@@ -202,32 +192,6 @@ public class VillagerJobScanner implements Listener {
     public void onVillagerCareerChange(VillagerCareerChangeEvent event) {
         Villager villager = event.getEntity();
         updateVillagerData(villager);
-        
-        // Check if villager is trying to claim a job site outside village territory
-        if (plugin instanceof HyEmpiresPlugin) {
-            HyEmpiresPlugin hyEmpiresPlugin = (HyEmpiresPlugin) plugin;
-            
-            // Get villager's job site location from stored data
-            VillagerData data = villagerDataMap.get(villager.getUniqueId());
-            if (data != null && data.jobsite != null) {
-                org.bukkit.Location jobSiteLoc = data.jobsite;
-                // Check if job site is in village territory
-                String villageName = hyEmpiresPlugin.getChunkTerritoryManager().getVillageForLocation(jobSiteLoc);
-                
-                if (villageName == null) {
-                    // Job site is outside village territory - break the link
-                    // Schedule task to break the workstation block
-                    plugin.getServer().getScheduler().runTaskLater(plugin, () -> {
-                        org.bukkit.block.Block workstationBlock = jobSiteLoc.getBlock();
-                        if (isWorkstationBlock(workstationBlock.getType())) {
-                            // Break the block to unlink the villager
-                            workstationBlock.breakNaturally();
-                            plugin.getLogger().info("Broke workstation outside village territory at " + jobSiteLoc);
-                        }
-                    }, 20L); // 1 second delay
-                }
-            }
-        }
     }
 
     @EventHandler
@@ -267,8 +231,17 @@ public class VillagerJobScanner implements Listener {
             changed = true;
         }
         
-        // Note: Workstation and bed locations are tracked through events and manual assignment
-        // They are not directly accessible via villager API in newer versions
+        // Sync bed and workstation from entity brain when we don't have them stored
+        Location bedFromEntity = getBedLocationFromEntity(villager);
+        if (bedFromEntity != null && data.bed == null) {
+            data.bed = bedFromEntity.clone();
+            changed = true;
+        }
+        Location jobFromEntity = getWorkstationLocationFromEntity(villager);
+        if (jobFromEntity != null && data.jobsite == null) {
+            data.jobsite = jobFromEntity.clone();
+            changed = true;
+        }
 
         if (changed) {
             updateCsv();
@@ -286,7 +259,6 @@ public class VillagerJobScanner implements Listener {
     /**
      * Convert VillagerData to NBT map.
      */
-    @SuppressWarnings("unchecked")
     private Map<String, Object> toNBT(VillagerData data) {
         Map<String, Object> nbt = new HashMap<>();
         nbt.put("name", data.name);
@@ -361,12 +333,29 @@ public class VillagerJobScanner implements Listener {
                         }
                     }
                 } else {
-                    // Fallback: try direct enum value (deprecated but needed for backward compatibility)
+                    // Fallback: try to get profession from registry using NamespacedKey
                     try {
-                        @SuppressWarnings("deprecation")
-                        Villager.Profession prof = Villager.Profession.valueOf(professionStr.toUpperCase());
-                        data.profession = prof;
-                    } catch (IllegalArgumentException e) {
+                        // Try to create NamespacedKey with minecraft: prefix
+                        NamespacedKey key;
+                        if (professionStr.contains(":")) {
+                            key = NamespacedKey.fromString(professionStr);
+                        } else {
+                            key = NamespacedKey.minecraft(professionStr.toLowerCase());
+                        }
+                        
+                        if (key != null) {
+                            // Use Registry.VILLAGER_PROFESSION
+                            org.bukkit.Registry<Villager.Profession> registry = org.bukkit.Registry.VILLAGER_PROFESSION;
+                            Villager.Profession prof = registry.get(key);
+                            if (prof != null) {
+                                data.profession = prof;
+                            } else {
+                                data.profession = null;
+                            }
+                        } else {
+                            data.profession = null;
+                        }
+                    } catch (Exception e) {
                         data.profession = null;
                     }
                 }
@@ -397,19 +386,53 @@ public class VillagerJobScanner implements Listener {
     }
     
     /**
-     * Get villager bed location.
+     * Get villager bed location: from stored data, or from entity (brain memory) if not stored.
      */
     public Location getVillagerBedLocation(Villager villager) {
         VillagerData data = villagerDataMap.get(villager.getUniqueId());
-        return data != null ? data.bed : null;
+        if (data != null && data.bed != null) return data.bed;
+        Location fromEntity = getBedLocationFromEntity(villager);
+        if (fromEntity != null && data != null) {
+            data.bed = fromEntity.clone();
+            updateCsv();
+        }
+        return fromEntity;
     }
     
     /**
-     * Get villager workstation location.
+     * Get villager workstation location: from stored data, or from entity (brain memory) if not stored.
      */
     public Location getVillagerWorkstationLocation(Villager villager) {
         VillagerData data = villagerDataMap.get(villager.getUniqueId());
-        return data != null ? data.jobsite : null;
+        if (data != null && data.jobsite != null) return data.jobsite;
+        Location fromEntity = getWorkstationLocationFromEntity(villager);
+        if (fromEntity != null && data != null) {
+            data.jobsite = fromEntity.clone();
+            updateCsv();
+        }
+        return fromEntity;
+    }
+    
+    /**
+     * Read bed location from villager's brain (HOME memory). Uses Bukkit MemoryKey API.
+     */
+    private Location getBedLocationFromEntity(Villager villager) {
+        try {
+            return villager.getMemory(MemoryKey.HOME);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+    
+    /**
+     * Read workstation location from villager's brain (JOB_SITE memory). Uses Bukkit MemoryKey API.
+     */
+    private Location getWorkstationLocationFromEntity(Villager villager) {
+        try {
+            return villager.getMemory(MemoryKey.JOB_SITE);
+        } catch (Throwable t) {
+            return null;
+        }
     }
     
     /**

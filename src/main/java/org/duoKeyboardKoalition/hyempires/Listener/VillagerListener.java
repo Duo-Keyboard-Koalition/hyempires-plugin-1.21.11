@@ -2,12 +2,16 @@ package org.duoKeyboardKoalition.hyempires.Listener;
 
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Villager;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntitySpawnEvent;
+import io.papermc.paper.event.entity.EntityMoveEvent;
 import org.bukkit.plugin.Plugin;
 
 import java.util.Random;
@@ -26,6 +30,9 @@ public class VillagerListener implements Listener {
             "Flora", "Greta", "Helga", "Ida", "Julia",
             "Klara", "Lydia", "Martha", "Nora", "Olga"
     };
+
+    /** Chance per block exit that ground decays (villager foot traffic). */
+    private static final double BLOCK_DECAY_CHANCE = 0.004;
 
     public VillagerListener(Plugin plugin) {
         this.plugin = plugin;
@@ -50,6 +57,39 @@ public class VillagerListener implements Listener {
         }
 
         plugin.getLogger().info("Named " + namedCount + " unnamed villagers");
+    }
+
+    /**
+     * When a villager transitions from one block to another, the block they exited (ground under feet)
+     * has a small chance to decay from frequent use. Only non-farmland. Chains: grass->dirt->coarse->path;
+     * stone->cobble->gravel; stone bricks->cracked; cobbled deepslate->deepslate tiles.
+     */
+    @EventHandler
+    public void onVillagerMove(EntityMoveEvent event) {
+        if (event.getEntityType() != EntityType.VILLAGER) return;
+        if (!event.hasChangedBlock()) return; // only when transitioning to another block (exiting a block)
+        Location from = event.getFrom();
+        if (random.nextDouble() >= BLOCK_DECAY_CHANCE) return;
+
+        // Block they were standing on (ground they exited)
+        Block ground = from.getWorld().getBlockAt(from.getBlockX(), from.getBlockY() - 1, from.getBlockZ());
+        if (ground.getType() == Material.FARMLAND) return; // never decay farmland
+        Material next = decayNext(ground.getType());
+        if (next != null) ground.setType(next);
+    }
+
+    /** Next material in the foot-traffic decay chain, or null if not decayable. */
+    private static Material decayNext(Material current) {
+        switch (current) {
+            case GRASS_BLOCK: return Material.DIRT;
+            case DIRT: return Material.COARSE_DIRT;
+            case COARSE_DIRT: return Material.DIRT_PATH;
+            case STONE: return Material.COBBLESTONE;
+            case COBBLESTONE: return Material.GRAVEL;
+            case STONE_BRICKS: return Material.CRACKED_STONE_BRICKS;
+            case COBBLED_DEEPSLATE: return Material.DEEPSLATE_TILES;
+            default: return null;
+        }
     }
 
     @EventHandler

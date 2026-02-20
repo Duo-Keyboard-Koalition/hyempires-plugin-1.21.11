@@ -6,8 +6,9 @@ import org.bukkit.block.Block;
 import java.util.*;
 
 /**
- * Scans for safe, standable blocks around a bell for villager rollcall positions.
+ * Scans for safe, standable blocks around a bell.
  * Each returned location is a block center where a villager can pathfind to and stand.
+ * (Previously used for rollcall feature, currently unused but kept for future use)
  */
 public class SafeBlockScanner {
     

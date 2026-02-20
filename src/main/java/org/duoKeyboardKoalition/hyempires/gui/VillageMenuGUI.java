@@ -11,11 +11,13 @@ import org.bukkit.entity.Villager;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.duoKeyboardKoalition.hyempires.FeudalVillagerType;
 import org.duoKeyboardKoalition.hyempires.HyEmpiresPlugin;
 import org.duoKeyboardKoalition.hyempires.managers.VillageManager;
 import org.duoKeyboardKoalition.hyempires.scanners.VillagerJobScanner;
 
 import java.util.*;
+import java.util.UUID;
 
 /**
  * Advanced menu system for village administration.
@@ -42,27 +44,41 @@ public class VillageMenuGUI {
             Material.PLAYER_HEAD,
             "§a§lPopulation",
             Arrays.asList(
-                "§7View all villagers in this village",
-                "§7Shows: Name, Bed Location, Workplace",
+                "§7View villagers by type:",
+                "§7Scout, Laborer, Peasant, Vassal",
                 "",
-                "§eClick to view population table"
+                "§eClick to choose type"
             )
         );
-        menu.setItem(11, populationBtn);
-        
-        // Rollcall button
-        ItemStack rollcallBtn = createMenuItem(
-            Material.BELL,
-            "§6§lRollcall",
+        menu.setItem(10, populationBtn);
+
+        // Villagers by profession (Minecraft profession filter)
+        ItemStack professionBtn = createMenuItem(
+            Material.EMERALD,
+            "§6§lVillagers by Profession",
             Arrays.asList(
-                "§7Summon all villagers to the bell",
-                "§7Each villager will arrive with",
-                "§7unique behavior patterns",
+                "§7View villagers in this village",
+                "§7Filter by Minecraft profession",
+                "§7(Farmer, Librarian, etc.)",
                 "",
-                "§eClick to start rollcall"
+                "§eClick to filter by profession"
             )
         );
-        menu.setItem(15, rollcallBtn);
+        menu.setItem(11, professionBtn);
+
+        // Rename Village button (only for leaders)
+        ItemStack renameBtn = createMenuItem(
+            Material.NAME_TAG,
+            "§6§lRename Village",
+            Arrays.asList(
+                "§7Change the name of this village",
+                "§7Only the current village leader",
+                "§7can rename the village",
+                "",
+                "§eClick to rename village"
+            )
+        );
+        menu.setItem(14, renameBtn);
         
         // Village info button
         ItemStack infoBtn = createMenuItem(
@@ -75,82 +91,202 @@ public class VillageMenuGUI {
                 "§eClick to view detailed info"
             )
         );
-        menu.setItem(13, infoBtn);
+        menu.setItem(16, infoBtn);
         
         player.openInventory(menu);
     }
     
+    /** Title prefix for profession selector (choose Minecraft profession). */
+    public static final String PROFESSION_SELECTOR_TITLE_PREFIX = "§6§lVillagers - ";
+    /** Title prefix for profession table (list of villagers for one profession). */
+    public static final String PROFESSION_TABLE_TITLE_PREFIX = "§6§lVillagers: ";
+
     /**
-     * Open the population table view.
+     * Open profession selector: All + Minecraft professions (Farmer, Librarian, etc.).
      */
-    public void openPopulationTable(Player player, VillageManager.VillageData village) {
-        // Get all villagers in the village
-        List<VillagerInfo> villagers = getVillagersInVillage(village);
-        
-        // Create inventory with enough slots (9 rows = 54 slots)
-        int size = Math.max(9, ((villagers.size() + 8) / 9) * 9);
-        size = Math.min(size, 54); // Max 6 rows
-        
-        Component popTitle = LegacyComponentSerializer.legacySection().deserialize("§a§lPopulation - " + village.name);
-        Inventory inv = Bukkit.createInventory(null, size, popTitle);
-        
-        for (int i = 0; i < Math.min(villagers.size(), size); i++) {
-            VillagerInfo info = villagers.get(i);
-            ItemStack item = createVillagerItem(info);
-            inv.setItem(i, item);
+    public void openVillagersByProfessionSelector(Player player, VillageManager.VillageData village) {
+        plugin.refreshVillageVillagerData(village);
+        List<Villager> all = plugin.getVillagersInVillage(village);
+        Component title = LegacyComponentSerializer.legacySection().deserialize(PROFESSION_SELECTOR_TITLE_PREFIX + village.name);
+        Inventory inv = Bukkit.createInventory(null, 27, title);
+
+        inv.setItem(0, createMenuItem(Material.EMERALD, "§a§lAll Professions",
+            Arrays.asList("§7Count: §f" + all.size(), "§7Show all villagers in this village", "", "§eClick to view")));
+
+        Villager.Profession[] professions = Villager.Profession.values();
+        for (int i = 0; i < Math.min(professions.length, 16); i++) {
+            Villager.Profession p = professions[i];
+            long count = all.stream().filter(v -> v.getProfession() == p).count();
+            Material icon = getProfessionIcon(p);
+            inv.setItem(1 + i, createMenuItem(icon, "§f§l" + formatProfessionName(p),
+                Arrays.asList("§7Count: §f" + count, "", "§eClick to filter")));
         }
-        
-        // Add back button
-        ItemStack backBtn = createMenuItem(
-            Material.ARROW,
-            "§7§lBack to Main Menu",
-            Collections.singletonList("§7Return to village administration")
-        );
-        inv.setItem(size - 1, backBtn);
-        
+
+        inv.setItem(26, createMenuItem(Material.ARROW, "§7§lBack to Main Menu",
+            Collections.singletonList("§7Return to village administration")));
         player.openInventory(inv);
     }
-    
+
     /**
-     * Get all villagers in a village.
+     * Open list of villagers in village filtered by Minecraft profession. profession null = all.
      */
-    private List<VillagerInfo> getVillagersInVillage(VillageManager.VillageData village) {
-        List<VillagerInfo> villagers = new ArrayList<>();
-        Location adminLoc = village.getAdminLocation();
-        if (adminLoc == null) return villagers;
-        
-        VillagerJobScanner scanner = plugin.getVillagerScanner();
-        Map<UUID, VillagerJobScanner.VillagerData> villagerData = scanner != null ? scanner.getVillagerData() : new HashMap<>();
-        
-        // Find all villagers within village radius
-        Collection<Villager> nearbyVillagers = new ArrayList<>();
-        for (org.bukkit.entity.Entity entity : adminLoc.getWorld()
-            .getNearbyEntities(adminLoc, village.effectiveRadius, 256, village.effectiveRadius)) {
-            if (entity instanceof Villager) {
-                nearbyVillagers.add((Villager) entity);
+    public void openVillagersByProfessionTable(Player player, VillageManager.VillageData village, Villager.Profession profession) {
+        List<Villager> all = plugin.getVillagersInVillage(village);
+        List<Villager> list = profession == null ? all : all.stream().filter(v -> v.getProfession() == profession).toList();
+        String profLabel = profession == null ? "All" : formatProfessionName(profession);
+        Component title = LegacyComponentSerializer.legacySection().deserialize(PROFESSION_TABLE_TITLE_PREFIX + profLabel + " - " + village.name);
+        Inventory inv = Bukkit.createInventory(null, 54, title);
+
+        int slot = 0;
+        if (list.isEmpty()) {
+            inv.setItem(0, createMenuItem(Material.BARRIER, "§c§lNo villagers",
+                Arrays.asList("§7No " + profLabel + " villagers in this village.", "§7Villagers are linked by bed/workstation in village radius.")));
+            slot = 1;
+        } else {
+            for (Villager v : list) {
+                if (slot >= 53) break;
+                inv.setItem(slot++, createVillagerProfessionItem(v));
             }
         }
-        
-        for (Villager villager : nearbyVillagers) {
+        inv.setItem(53, createMenuItem(Material.ARROW, "§7§lBack to Profession Selection",
+            Collections.singletonList("§7Choose profession filter")));
+        player.openInventory(inv);
+    }
+
+    private ItemStack createVillagerProfessionItem(Villager villager) {
+        Villager.Profession p = villager.getProfession();
+        Material icon = getProfessionIcon(p);
+        ItemStack item = new ItemStack(icon);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            Component customName = villager.customName();
+            String nameStr = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : null;
+            String display = nameStr != null && !nameStr.isEmpty() ? nameStr : ("Villager - " + formatProfessionName(p));
+            meta.displayName(LegacyComponentSerializer.legacySection().deserialize("§a" + display));
+            List<String> lore = Arrays.asList(
+                "§7§m                    ",
+                "§7Profession: §b" + formatProfessionName(p),
+                "§7Type: §f" + (plugin.getVillagerType(villager) != null ? plugin.getVillagerType(villager).getDisplayName() : "—")
+            );
+            meta.lore(lore.stream().map(LegacyComponentSerializer.legacySection()::deserialize).toList());
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private static String formatProfessionName(Villager.Profession p) {
+        if (p == null) return "None";
+        try {
+            String key = p.getKey() != null ? p.getKey().getKey() : p.name();
+            return key == null ? "None" : key.substring(0, 1).toUpperCase() + key.substring(1).toLowerCase().replace('_', ' ');
+        } catch (Exception e) {
+            return p.name() != null ? p.name() : "None";
+        }
+    }
+
+    /** Title prefix for population type selector (choose Scout/Laborer/Peasant/Vassal). */
+    public static final String POPULATION_SELECTOR_TITLE_PREFIX = "§a§lPopulation - ";
+    /** Title prefix for population table (list of villagers for one type). */
+    public static final String POPULATION_TABLE_TITLE_PREFIX = "§a§lPopulation: ";
+
+    /**
+     * Open the population type selector (All / Scout / Laborer / Peasant / Vassal).
+     * Refreshes villager data for this village when opened so the list is current.
+     */
+    public void openPopulationTypeSelector(Player player, VillageManager.VillageData village) {
+        plugin.refreshVillageVillagerData(village);
+
+        Component title = LegacyComponentSerializer.legacySection().deserialize(POPULATION_SELECTOR_TITLE_PREFIX + village.name);
+        Inventory inv = Bukkit.createInventory(null, 9, title);
+
+        int allCount = 0;
+        for (FeudalVillagerType t : FeudalVillagerType.values()) allCount += plugin.getVillagerCountByType(village, t);
+        inv.setItem(0, createMenuItem(Material.EMERALD, "§a§lAll Types",
+            Arrays.asList("§7Count: §f" + allCount, "§7Show all villagers linked to this village", "", "§eClick to view")));
+
+        inv.setItem(1, createTypeButton(village, FeudalVillagerType.SCOUT, Material.LEATHER_BOOTS));
+        inv.setItem(2, createTypeButton(village, FeudalVillagerType.LABORER, Material.IRON_PICKAXE));
+        inv.setItem(3, createTypeButton(village, FeudalVillagerType.PEASANT, Material.RED_BED));
+        inv.setItem(4, createTypeButton(village, FeudalVillagerType.VASSAL, Material.GOLD_INGOT));
+
+        ItemStack backBtn = createMenuItem(Material.ARROW, "§7§lBack to Main Menu",
+            Collections.singletonList("§7Return to village administration"));
+        inv.setItem(8, backBtn);
+
+        player.openInventory(inv);
+    }
+
+    private ItemStack createTypeButton(VillageManager.VillageData village, FeudalVillagerType type, Material icon) {
+        int count = plugin.getVillagerCountByType(village, type);
+        return createMenuItem(icon, "§f§l" + type.getDisplayName(),
+            Arrays.asList(type.getDescription(), "§7Count: §f" + count, "", "§eClick to view"));
+    }
+
+    /**
+     * Open the population table for a chosen type (or All). Shows placeholder if empty.
+     */
+    public void openPopulationTable(Player player, VillageManager.VillageData village, FeudalVillagerType filterType) {
+        List<VillagerInfo> villagers = getVillagersInVillage(village, filterType);
+        int size = 54;
+        String typeLabel = filterType == null ? "All" : filterType.getDisplayName();
+        Component popTitle = LegacyComponentSerializer.legacySection().deserialize(POPULATION_TABLE_TITLE_PREFIX + typeLabel + " - " + village.name);
+        Inventory inv = Bukkit.createInventory(null, size, popTitle);
+
+        int slot = 0;
+        if (villagers.isEmpty()) {
+            inv.setItem(0, createMenuItem(Material.BARRIER, "§c§lNo villagers",
+                Arrays.asList("§7No " + typeLabel + " villagers in this village.", "§7Assign beds/workstations in village to see them here.")));
+            slot = 1;
+        } else {
+            for (VillagerInfo info : villagers) {
+                if (slot >= size - 1) break;
+                inv.setItem(slot++, createVillagerItem(info));
+            }
+        }
+
+        ItemStack backBtn = createMenuItem(Material.ARROW, "§7§lBack to Type Selection",
+            Collections.singletonList("§7Choose Scout / Laborer / Peasant / Vassal"));
+        inv.setItem(size - 1, backBtn);
+
+        player.openInventory(inv);
+    }
+
+    /**
+     * Get villagers linked to this village, optionally filtered by type. Null = all types.
+     */
+    private List<VillagerInfo> getVillagersInVillage(VillageManager.VillageData village, FeudalVillagerType filterType) {
+        List<Villager> villagers;
+        if (filterType == null) {
+            villagers = new ArrayList<>();
+            for (FeudalVillagerType t : FeudalVillagerType.values()) {
+                villagers.addAll(plugin.getVillagersInVillageByType(village, t));
+            }
+        } else {
+            villagers = plugin.getVillagersInVillageByType(village, filterType);
+        }
+        return toVillagerInfoList(villagers);
+    }
+
+    private List<VillagerInfo> toVillagerInfoList(List<Villager> villagers) {
+        List<VillagerInfo> out = new ArrayList<>();
+        VillagerJobScanner scanner = plugin.getVillagerScanner();
+        Map<UUID, VillagerJobScanner.VillagerData> villagerData = scanner != null ? scanner.getVillagerData() : new HashMap<>();
+        for (Villager villager : villagers) {
             UUID uuid = villager.getUniqueId();
             VillagerJobScanner.VillagerData data = villagerData.get(uuid);
-            
             VillagerInfo info = new VillagerInfo();
             info.villager = villager;
             Component customName = villager.customName();
             String nameStr = customName != null ? LegacyComponentSerializer.legacySection().serialize(customName) : null;
             info.name = nameStr != null ? nameStr : (data != null && data.name != null ? data.name : "Villager");
-            info.bedLocation = data != null ? data.bed : null;
-            info.workplaceLocation = data != null ? data.jobsite : null;
+            info.bedLocation = scanner != null ? scanner.getVillagerBedLocation(villager) : (data != null ? data.bed : null);
+            info.workplaceLocation = scanner != null ? scanner.getVillagerWorkstationLocation(villager) : (data != null ? data.jobsite : null);
             info.profession = villager.getProfession();
-            
-            villagers.add(info);
+            info.type = plugin.getVillagerType(villager);
+            out.add(info);
         }
-        
-        // Sort by name
-        villagers.sort(Comparator.comparing(v -> v.name));
-        
-        return villagers;
+        out.sort(Comparator.comparing(v -> v.name));
+        return out;
     }
     
     /**
@@ -181,27 +317,10 @@ public class VillageMenuGUI {
         
         if (meta != null) {
             meta.displayName(LegacyComponentSerializer.legacySection().deserialize("§a" + info.name));
-            
+
             List<String> loreStrings = new ArrayList<>();
             loreStrings.add("§7§m                    ");
-            loreStrings.add("§eBed Location:");
-            if (info.bedLocation != null) {
-                loreStrings.add("§7  X: §f" + info.bedLocation.getBlockX());
-                loreStrings.add("§7  Y: §f" + info.bedLocation.getBlockY());
-                loreStrings.add("§7  Z: §f" + info.bedLocation.getBlockZ());
-            } else {
-                loreStrings.add("§c  No bed assigned");
-            }
-            loreStrings.add("");
-            loreStrings.add("§eWorkplace Location:");
-            if (info.workplaceLocation != null) {
-                loreStrings.add("§7  X: §f" + info.workplaceLocation.getBlockX());
-                loreStrings.add("§7  Y: §f" + info.workplaceLocation.getBlockY());
-                loreStrings.add("§7  Z: §f" + info.workplaceLocation.getBlockZ());
-            } else {
-                loreStrings.add("§c  No workplace assigned");
-            }
-            loreStrings.add("");
+            loreStrings.add("§6Type: §f" + (info.type != null ? info.type.getDisplayName() : "Vassal"));
             String professionName = getProfessionKey(info.profession);
             loreStrings.add("§7Profession: §b" + professionName);
             
@@ -278,5 +397,7 @@ public class VillageMenuGUI {
         public Location bedLocation;
         public Location workplaceLocation;
         public Villager.Profession profession;
+        /** Feudal hierarchy: Scout / Laborer / Peasant / Vassal (population table shows Vassals only). */
+        public FeudalVillagerType type;
     }
 }
